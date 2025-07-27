@@ -1,0 +1,311 @@
+#!/usr/bin/env python3
+import sys
+from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton, QSlider, QLabel, QVBoxLayout, QWidget, QMessageBox, QGridLayout, QLineEdit
+from PyQt5.QtCore import Qt, QTimer
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
+from geometry_msgs.msg import Twist
+from px4_msgs.msg import VehicleCommand, VehicleStatus, VehicleLandDetected
+from std_msgs.msg import Bool
+import math
+import time
+
+# added dictionary to convert state number to actual state
+def nav_state_to_string(nav_state):
+    return {
+        0: "Manual",
+        1: "Altitude",
+        2: "Position",
+        3: "Mission",
+        4: "Hold",
+        5: "RTL",
+        6: "Position Slow",
+        10: "Acro",
+        12: "Descend",
+        13: "Terminate",
+        14: "Offboard",
+        15: "Stabilized",
+        17: "Takeoff",
+        18: "Land",
+        19: "Follow",
+        20: "Precision Land",
+        21: "Orbit",
+        22: "VTOL Takeoff",
+    }.get(nav_state, f"Unknown ({nav_state})")
+
+# same logic for arm number to arm state
+def arming_state_to_string(arming_state):
+    return {
+        1: "Disarmed",
+        2: "Armed"
+    }.get(arming_state, f"Unknown ({arming_state})")
+
+class DroneGUIControl(Node):
+    def __init__(self):
+        super().__init__('gui_control')
+        qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=10
+        )
+
+        self.vel_pub = self.create_publisher(Twist, 'offboard_velocity_cmd', qos)
+        self.arm_pub = self.create_publisher(Bool, '/arm_message', qos)
+        self.cmd_pub = self.create_publisher(VehicleCommand, '/fmu/in/vehicle_command', 10)
+        # added publisher to stop offboard when switching to land
+        self.stop_offboard_pub = self.create_publisher(Bool, '/stop_offboard', qos)
+
+        self.status_sub = self.create_subscription(VehicleStatus, '/fmu/out/vehicle_status_v1', self.status_callback, qos)
+        # Add subscription for land detection
+        self.land_detected_sub = self.create_subscription(VehicleLandDetected, '/fmu/out/vehicle_land_detected', self.land_detected_callback, qos)
+
+        self.current_status = VehicleStatus()
+        self.is_landed = True 
+        self.window = None
+
+        self.timer = self.create_timer(0.02, self.timer_callback)
+        self.twist = Twist()
+    
+    def timer_callback(self):
+        self.vel_pub.publish(self.twist)
+    
+    def publish_vehicle_command(self, command, param1=0.0, param2=0.0, param7=0.0):
+        cmd = VehicleCommand()
+        cmd.command = command
+        cmd.param1 = param1
+        cmd.param2 = param2
+        cmd.param7 = param7
+        cmd.target_system = 1
+        cmd.target_component = 1
+        cmd.source_system = 1
+        cmd.source_component = 1
+        cmd.from_external = True
+        cmd.timestamp = int(self.get_clock().now().nanoseconds / 1000)
+        self.cmd_pub.publish(cmd)
+
+    def status_callback(self, msg):
+        self.current_status = msg
+        self.update_gui_state()
+
+    def land_detected_callback(self, msg):
+        self.is_landed = msg.landed
+        self.update_gui_state()
+
+    # handles the functionality of enabling the button or disabling the button
+    def update_gui_state(self):
+        """Update GUI button states based on current vehicle status"""
+        if not self.window:
+            return
+
+        is_armed = self.current_status.arming_state == VehicleStatus.ARMING_STATE_ARMED
+        is_disarmed = self.current_status.arming_state == VehicleStatus.ARMING_STATE_DISARMED
+
+        if is_armed and not self.is_landed:
+            # Drone is armed and airborne - enable land button, disable arm button
+            self.window.arm_button.setText("Armed")
+            self.window.arm_button.setEnabled(False)
+            if self.current_status.nav_state == VehicleStatus.NAVIGATION_STATE_AUTO_LAND:
+                self.window.land_button.setText("Landing...")
+                self.window.land_button.setEnabled(False)
+            else:
+                self.window.land_button.setText("Land and Disarm")
+                self.window.land_button.setEnabled(True)
+        elif is_disarmed and self.is_landed:
+            # Drone is disarmed and landed - ready for next flight
+            self.window.arm_button.setText("Arm and Takeoff")
+            self.window.arm_button.setEnabled(True)
+            self.window.land_button.setText("Land and Disarm")
+            self.window.land_button.setEnabled(False)
+        else:
+            # Default state
+            self.window.arm_button.setText("Arm and Takeoff")
+            self.window.arm_button.setEnabled(is_disarmed)
+            self.window.land_button.setEnabled(False)
+
+    def arm_drone(self, arm):
+        if arm:
+            if self.current_status.arming_state == VehicleStatus.ARMING_STATE_ARMED:
+                self.get_logger().info("Drone is already armed")
+                return
+            self.arm_pub.publish(Bool(data=True))
+            self.get_logger().info("Sending arm message")
+    
+    def land_drone(self):
+        self.stop_offboard_pub.publish(Bool(data=True))
+        self.get_logger().info("Land command sent, switching to Land mode")
+        self.arm_pub.publish(Bool(data=False))
+
+class MainWindow(QMainWindow):
+    def __init__(self, node):
+        super().__init__()
+        self.node = node
+        self.setWindowTitle("PX4 Drone Control GUI")
+        self.setGeometry(500, 200, 500, 500)
+        
+        # Layout
+        layout = QVBoxLayout()
+        widget = QWidget()
+        widget.setLayout(layout)
+        self.setCentralWidget(widget)
+        
+        self.arm_button = QPushButton("Arm and Takeoff")
+        self.arm_button.clicked.connect(self.arm_logic)
+        layout.addWidget(self.arm_button)
+
+        self.land_button = QPushButton("Land and Disarm")
+        self.land_button.clicked.connect(self.land_logic)
+        self.land_button.setEnabled(False)
+        layout.addWidget(self.land_button)
+
+        rc_layout = QGridLayout()
+
+        throttle_layout = QVBoxLayout()
+        self.throttle_slider = QSlider(Qt.Vertical)
+        self.throttle_slider.setRange(-100, 100)
+        self.throttle_slider.setFixedHeight(200)
+        self.throttle_slider.valueChanged.connect(self.update_velocity)
+        self.throttle_slider.sliderReleased.connect(self.reset_sliders)
+        throttle_layout.addWidget(QLabel("Z Velocity (m/s)"), alignment=Qt.AlignCenter)
+        throttle_layout.addWidget(self.throttle_slider, alignment=Qt.AlignCenter)
+        rc_layout.addLayout(throttle_layout, 0, 0)
+
+        yaw_layout = QVBoxLayout()
+        self.yaw_slider = QSlider(Qt.Horizontal)
+        self.yaw_slider.setRange(-100, 100)
+        self.yaw_slider.setFixedWidth(200)
+        self.yaw_slider.valueChanged.connect(self.update_velocity)
+        self.yaw_slider.sliderReleased.connect(self.reset_sliders)
+        yaw_layout.addWidget(QLabel("Yaw Rate (rad/s)"), alignment=Qt.AlignCenter)
+        yaw_layout.addWidget(self.yaw_slider, alignment=Qt.AlignCenter)
+        rc_layout.addLayout(yaw_layout, 1, 0)
+        
+        pitch_layout = QVBoxLayout()
+        self.pitch_slider = QSlider(Qt.Vertical)
+        self.pitch_slider.setRange(-100, 100)
+        self.pitch_slider.setFixedHeight(200)
+        self.pitch_slider.valueChanged.connect(self.update_velocity)
+        self.pitch_slider.sliderReleased.connect(self.reset_sliders)
+        pitch_layout.addWidget(QLabel("X Velocity (m/s)"), alignment=Qt.AlignCenter)
+        pitch_layout.addWidget(self.pitch_slider, alignment=Qt.AlignCenter)
+        rc_layout.addLayout(pitch_layout, 0, 1)
+
+        roll_layout = QVBoxLayout()
+        self.roll_slider = QSlider(Qt.Horizontal)
+        self.roll_slider.setRange(-100, 100)
+        self.roll_slider.setFixedWidth(200)
+        self.roll_slider.valueChanged.connect(self.update_velocity)
+        self.roll_slider.sliderReleased.connect(self.reset_sliders)
+        roll_layout.addWidget(QLabel("Y Velocity (m/s)"), alignment=Qt.AlignCenter)
+        roll_layout.addWidget(self.roll_slider, alignment=Qt.AlignCenter)
+        rc_layout.addLayout(roll_layout, 1, 1)
+
+        layout.addLayout(rc_layout)
+
+        textbox_layout = QGridLayout()
+
+        self.xy_angle = QLineEdit(self)
+        self.xy_angle.setPlaceholderText("Enter angle (X)")
+        textbox_layout.addWidget(self.xy_angle, 0, 0)
+
+        self.z_angle = QLineEdit(self)
+        self.z_angle.setPlaceholderText("Enter angle (Z)")
+        textbox_layout.addWidget(self.z_angle, 0, 1)
+
+        self.velocity = QLineEdit(self)
+        self.velocity.setPlaceholderText("Enter velocity")
+        textbox_layout.addWidget(self.velocity, 0, 2)
+
+        self.duration = QLineEdit(self)
+        self.duration.setPlaceholderText("Enter duration")
+        textbox_layout.addWidget(self.duration, 0, 3)
+
+        self.xy_angle.setToolTip("Angle in XY plane (0°=forward, 90°=right, 180°=back)")
+        self.z_angle.setToolTip("Angle above XY plane (0°=flat, 90°=straight up)")
+        self.velocity.setToolTip("Speed magnitude in m/s")
+        self.duration.setToolTip("Duration in s")
+        
+        layout.addLayout(textbox_layout)
+
+        self.submit_button = QPushButton("Submit")
+        self.submit_button.clicked.connect(self.submit)
+        layout.addWidget(self.submit_button)
+
+    def submit(self):
+        xy_deg = float(self.xy_angle.text())
+        z_deg = float(self.z_angle.text())
+        vel = float(self.velocity.text())
+        duration_time = float(self.duration.text())
+
+        self.xy_angle.clear()
+        self.z_angle.clear()
+        self.velocity.clear()
+        self.duration.clear()
+    
+        v_pitch = vel * math.cos(math.radians(z_deg)) * math.cos(math.radians(xy_deg))
+        v_roll = vel * math.cos(math.radians(z_deg)) * math.sin(math.radians(xy_deg))
+        v_throttle = vel * math.sin(math.radians(z_deg))
+
+        self.node.twist.linear.y = v_roll
+        self.node.twist.linear.z = v_throttle
+        self.node.twist.linear.x = v_pitch
+        self.node.twist.angular.z = 0.0
+
+        self.node.get_logger().info(f"Velocity set: x={v_pitch:.2f}, y={v_roll:.2f}, z={v_throttle:.2f}")
+
+        QTimer.singleShot(int(duration_time * 1000), self.stop_velocity)
+    
+    def stop_velocity(self):
+        self.node.twist.linear.x = 0.0
+        self.node.twist.linear.y = 0.0
+        self.node.twist.linear.z = 0.0
+        self.node.twist.angular.z = 0.0
+        self.node.get_logger().info("Velocity stopped")
+
+    def reset_sliders(self):
+        self.pitch_slider.setValue(0)
+        self.throttle_slider.setValue(0)
+        self.roll_slider.setValue(0)
+        self.yaw_slider.setValue(0)
+        self.update_velocity()
+    
+    def update_velocity(self):
+        # self.node.twist.linear.y = self.pitch_slider.value() / 100.0
+        # self.node.twist.linear.x = -(self.roll_slider.value() / 100.0)
+        self.node.twist.linear.x = self.pitch_slider.value() / 50.0
+        self.node.twist.linear.y = self.roll_slider.value() / 50.0
+        self.node.twist.linear.z = self.throttle_slider.value() / 100.0
+        self.node.twist.angular.z = self.yaw_slider.value() / 100.0
+
+    def arm_logic(self):
+        if self.node.current_status.arming_state == VehicleStatus.ARMING_STATE_ARMED:
+            QMessageBox.warning(self, "Arming Error", "Drone is already armed!")
+        else:
+            self.node.arm_drone(True)
+            self.node.get_logger().info("Arm button pressed, arming...")
+
+    def land_logic(self):
+        self.node.land_drone()
+
+def main():
+    rclpy.init()
+    app = QApplication(sys.argv)
+    node = DroneGUIControl()
+    window = MainWindow(node)
+    window.show()
+    node.window = window
+
+    # Integrate ROS 2 with Qt loop
+    from PyQt5.QtCore import QTimer
+    timer = QTimer()
+    timer.timeout.connect(lambda: rclpy.spin_once(node, timeout_sec=0))
+    timer.start(10)
+
+    app.exec_()
+
+    node.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()

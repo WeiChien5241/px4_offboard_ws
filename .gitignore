@@ -1,0 +1,19 @@
+# ROS 2 build artifacts
+build/
+install/
+log/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Ignore px4_msgs (keep it local)
+src/px4_msgs/
+
+# VSCode settings
+.vscode/
+
+# Misc
+*.swp
+*.bak
+
