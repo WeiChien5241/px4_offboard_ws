@@ -269,8 +269,8 @@ class MainWindow(QMainWindow):
 
         self.x_coord.clear()
         self.y_coord.clear()
-        self.velocity.clear()
-        self.duration.clear()
+        self.coords_velocity.clear()
+        self.coords_duration.clear()
 
         IMAGE_WIDTH = 640
         IMAGE_HEIGHT = 480
@@ -280,7 +280,7 @@ class MainWindow(QMainWindow):
         cx = IMAGE_WIDTH / 2
         cy = IMAGE_HEIGHT / 2
         x_offset = target_x_coord - cx
-        y_offset = cy - target_y_coord
+        y_offset = target_y_coord - cy
 
         xy_degree = (x_offset / (IMAGE_WIDTH / 2)) * (HFOV_DEG / 2)
         z_degree = (y_offset / (IMAGE_HEIGHT / 2)) * (VFOV_DEG / 2)
