@@ -232,6 +232,71 @@ class MainWindow(QMainWindow):
         self.submit_button.clicked.connect(self.submit)
         layout.addWidget(self.submit_button)
 
+        coords_textbox_layout = QGridLayout()
+
+        self.x_coord = QLineEdit(self)
+        self.x_coord.setPlaceholderText("Enter coordinate (X)")
+        coords_textbox_layout.addWidget(self.x_coord, 0, 0)
+
+        self.y_coord = QLineEdit(self)
+        self.y_coord.setPlaceholderText("Enter coordinate (Y)")
+        coords_textbox_layout.addWidget(self.y_coord, 0, 1)
+
+        self.coords_velocity = QLineEdit(self)
+        self.coords_velocity.setPlaceholderText("Enter velocity")
+        coords_textbox_layout.addWidget(self.coords_velocity, 0, 2)
+
+        self.coords_duration = QLineEdit(self)
+        self.coords_duration.setPlaceholderText("Enter duration")
+        coords_textbox_layout.addWidget(self.coords_duration, 0, 3)
+
+        self.x_coord.setToolTip("Coordinate in X (0-640)")
+        self.y_coord.setToolTip("Coordinate in Y (0-480)")
+        self.coords_velocity.setToolTip("Speed magnitude in m/s")
+        self.coords_duration.setToolTip("Duration in s")
+        
+        layout.addLayout(coords_textbox_layout)
+
+        self.coords_submit_button = QPushButton("Submit")
+        self.coords_submit_button.clicked.connect(self.coords_submit)
+        layout.addWidget(self.coords_submit_button)
+
+    def coords_submit(self):
+        target_x_coord = float(self.x_coord.text())
+        target_y_coord = float(self.y_coord.text())
+        coord_vel = float(self.coords_velocity.text())
+        coord_duration_time = float(self.coords_duration.text())
+
+        self.x_coord.clear()
+        self.y_coord.clear()
+        self.velocity.clear()
+        self.duration.clear()
+
+        IMAGE_WIDTH = 640
+        IMAGE_HEIGHT = 480
+        HFOV_DEG = 60
+        VFOV_DEG = 45
+        
+        cx = IMAGE_WIDTH / 2
+        cy = IMAGE_HEIGHT / 2
+        x_offset = target_x_coord - cx
+        y_offset = cy - target_y_coord
+
+        xy_degree = (x_offset / (IMAGE_WIDTH / 2)) * (HFOV_DEG / 2)
+        z_degree = (y_offset / (IMAGE_HEIGHT / 2)) * (VFOV_DEG / 2)
+
+        v_pitch_coord = coord_vel * math.cos(math.radians(z_degree)) * math.cos(math.radians(xy_degree))
+        v_roll_coord = coord_vel * math.cos(math.radians(z_degree)) * math.sin(math.radians(xy_degree))
+        v_throttle_coord = coord_vel * math.sin(math.radians(z_degree))
+
+        self.node.twist.linear.y = v_roll_coord
+        self.node.twist.linear.z = v_throttle_coord
+        self.node.twist.linear.x = v_pitch_coord
+        self.node.twist.angular.z = 0.0
+
+        self.node.get_logger().info(f"Velocity set: x={v_pitch_coord:.2f}, y={v_roll_coord:.2f}, z={v_throttle_coord:.2f}")
+
+        QTimer.singleShot(int(coord_duration_time * 1000), self.stop_velocity)
     def submit(self):
         xy_deg = float(self.xy_angle.text())
         z_deg = float(self.z_angle.text())
