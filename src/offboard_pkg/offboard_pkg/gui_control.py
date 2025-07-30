@@ -64,13 +64,18 @@ class ClickableCanvas(QWidget):
             self.click_x = event.x()
             self.click_y = event.y()
             self.update()
-            self.parent().on_canvas_click()
+
+            parent = self.parent()
+            while parent and not hasattr(parent, 'on_canvas_click'):
+                parent = parent.parent()
+            if parent:
+                parent.on_canvas_click()
     
     def get_angles_from_pixel(self, x, y):
         offset_x = x - self.center_x
         offset_y = y - self.center_y
         angle_xy = (offset_x / (self.canvas_width / 2)) * (self.HFOV_DEG / 2)
-        angle_z = (offset_y / (self.canvas_height / 2)) * (self.VFOV_DEG / 2)
+        angle_z = -(offset_y / (self.canvas_height / 2)) * (self.VFOV_DEG / 2)
         return angle_xy, angle_z
 
     def paintEvent(self, event):
