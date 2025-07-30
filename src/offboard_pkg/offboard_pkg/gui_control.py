@@ -43,7 +43,12 @@ def arming_state_to_string(arming_state):
     }.get(arming_state, f"Unknown ({arming_state})")
 
 class ClickableCanvas(QWidget):
-    def __init__(self, width=640, height=480):
+    IMAGE_WIDTH = 640
+    IMAGE_HEIGHT = 480
+    HFOV_DEG = 60
+    VFOV_DEG = 45
+
+    def __init__(self, width=IMAGE_WIDTH, height=IMAGE_HEIGHT):
         super().__init__()
         self.canvas_height = height
         self.canvas_width = width
@@ -54,20 +59,19 @@ class ClickableCanvas(QWidget):
         self.center_x = self.canvas_width // 2
         self.center_y = self.canvas_height // 2
 
-        self.HFOV_DEG = 60
-        self.VFOV_DEG = 45
-
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.click_x = event.x()
             self.click_y = event.y()
             self.update()
-
-            parent = self.parent()
-            while parent and not hasattr(parent, 'on_canvas_click'):
-                parent = parent.parent()
-            if parent:
-                parent.on_canvas_click()
+            self.parent().on_canvas_click()
+    
+    def get_angles_from_pixel(self, x, y):
+        offset_x = x - self.center_x
+        offset_y = y - self.center_y
+        angle_xy = (offset_x / (self.canvas_width / 2)) * (self.HFOV_DEG / 2)
+        angle_z = (offset_y / (self.canvas_height / 2)) * (self.VFOV_DEG / 2)
+        return angle_xy, angle_z
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -105,15 +109,15 @@ class ClickableCanvas(QWidget):
             painter.setBrush(QBrush(Qt.blue))
             painter.setPen(QPen(Qt.blue, 2))
             painter.drawEllipse(self.click_x - 5, self.click_y - 5, 10, 10)
-
-            offset_x = self.click_x - self.center_x
-            offset_y = self.click_y - self.center_y
-
-            angle_xy = (offset_x / (self.canvas_width / 2)) * (self.HFOV_DEG / 2)
-            angle_z = (offset_y / (self.canvas_height / 2)) * (self.VFOV_DEG / 2)
-
+            angle_xy, angle_z = self.get_angles_from_pixel(self.click_x, self.click_y)
             painter.drawText(self.click_x + 10, self.click_y - 10, f"({self.click_x}, {self.click_y})")
             painter.drawText(self.click_x + 10, self.click_y + 10, f"XY: {angle_xy:.1f}°, Z: {angle_z:.1f}°")
+
+def velocity_from_angles(vel, angle_xy, angle_z):
+    v_pitch = vel * math.cos(math.radians(angle_z)) * math.cos(math.radians(angle_xy))
+    v_roll = vel * math.cos(math.radians(angle_z)) * math.sin(math.radians(angle_xy))
+    v_throttle = vel * math.sin(math.radians(angle_z))
+    return v_pitch, v_roll, v_throttle
 
 class DroneGUIControl(Node):
     def __init__(self):
@@ -373,7 +377,6 @@ class MainWindow(QMainWindow):
         self.canvas_execute_button.setEnabled(False)
 
     def execute_canvas_target(self):
-            
         try:
             canvas_vel = float(self.canvas_velocity.text())
             canvas_duration_time = float(self.canvas_duration.text())
@@ -383,88 +386,66 @@ class MainWindow(QMainWindow):
 
         target_x = self.canvas.click_x
         target_y = self.canvas.click_y
-
-        IMAGE_WIDTH = 640
-        IMAGE_HEIGHT = 480
-        HFOV_DEG = 60
-        VFOV_DEG = 45
         
-        cent_x = IMAGE_WIDTH / 2
-        cent_y = IMAGE_HEIGHT / 2
-        x_off = target_x - cent_x
-        y_off = target_y - cent_y
+        angle_xy, angle_z = self.canvas.get_angles_from_pixel(target_x, target_y)
+        v_pitch, v_roll, v_throttle = velocity_from_angles(canvas_vel, angle_xy, angle_z)
 
-        deg_xy = (x_off / (IMAGE_WIDTH / 2)) * (HFOV_DEG / 2)
-        deg_z = (y_off / (IMAGE_HEIGHT / 2)) * (VFOV_DEG / 2)
-
-        coord_v_pitch = canvas_vel * math.cos(math.radians(deg_z)) * math.cos(math.radians(deg_xy))
-        coord_v_roll = canvas_vel * math.cos(math.radians(deg_z)) * math.sin(math.radians(deg_xy))
-        coord_v_throttle = canvas_vel * math.sin(math.radians(deg_z))
-
-        self.node.twist.linear.y = coord_v_roll
-        self.node.twist.linear.z = coord_v_throttle
-        self.node.twist.linear.x = coord_v_pitch
+        self.node.twist.linear.x = v_pitch
+        self.node.twist.linear.y = v_roll
+        self.node.twist.linear.z = v_throttle
         self.node.twist.angular.z = 0.0
 
-        self.node.get_logger().info(f"Canvas target velocity set: x={coord_v_pitch:.2f}, y={coord_v_roll:.2f}, z={coord_v_throttle:.2f}")
+        self.node.get_logger().info(f"Canvas target velocity set: x={v_pitch:.2f}, y={v_roll:.2f}, z={v_throttle:.2f}")
 
         QTimer.singleShot(int(canvas_duration_time * 1000), self.stop_velocity)
 
     def coords_submit(self):
-        target_x_coord = float(self.x_coord.text())
-        target_y_coord = float(self.y_coord.text())
-        coord_vel = float(self.coords_velocity.text())
-        coord_duration_time = float(self.coords_duration.text())
-
+        try:
+            target_x_coord = float(self.x_coord.text())
+            target_y_coord = float(self.y_coord.text())
+            coord_vel = float(self.coords_velocity.text())
+            coord_duration_time = float(self.coords_duration.text())
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Input", "Please enter valid coordinate, velocity, and duration values!")
+            return
+        
         self.x_coord.clear()
         self.y_coord.clear()
         self.coords_velocity.clear()
         self.coords_duration.clear()
 
-        IMAGE_WIDTH = 640
-        IMAGE_HEIGHT = 480
-        HFOV_DEG = 60
-        VFOV_DEG = 45
-        
-        cx = IMAGE_WIDTH / 2
-        cy = IMAGE_HEIGHT / 2
-        x_offset = target_x_coord - cx
-        y_offset = target_y_coord - cy
+        angle_xy, angle_z = self.canvas.get_angles_from_pixel(target_x_coord, target_y_coord)
+        v_pitch, v_roll, v_throttle = velocity_from_angles(coord_vel, angle_xy, angle_z)
 
-        xy_degree = (x_offset / (IMAGE_WIDTH / 2)) * (HFOV_DEG / 2)
-        z_degree = (y_offset / (IMAGE_HEIGHT / 2)) * (VFOV_DEG / 2)
-
-        v_pitch_coord = coord_vel * math.cos(math.radians(z_degree)) * math.cos(math.radians(xy_degree))
-        v_roll_coord = coord_vel * math.cos(math.radians(z_degree)) * math.sin(math.radians(xy_degree))
-        v_throttle_coord = coord_vel * math.sin(math.radians(z_degree))
-
-        self.node.twist.linear.y = v_roll_coord
-        self.node.twist.linear.z = v_throttle_coord
-        self.node.twist.linear.x = v_pitch_coord
+        self.node.twist.linear.x = v_pitch
+        self.node.twist.linear.y = v_roll
+        self.node.twist.linear.z = v_throttle
         self.node.twist.angular.z = 0.0
 
-        self.node.get_logger().info(f"Velocity set: x={v_pitch_coord:.2f}, y={v_roll_coord:.2f}, z={v_throttle_coord:.2f}")
+        self.node.get_logger().info(f"Velocity set: x={v_pitch:.2f}, y={v_roll:.2f}, z={v_throttle:.2f}")
 
         QTimer.singleShot(int(coord_duration_time * 1000), self.stop_velocity)
 
     def submit(self):
-        xy_deg = float(self.xy_angle.text())
-        z_deg = float(self.z_angle.text())
-        vel = float(self.velocity.text())
-        duration_time = float(self.duration.text())
+        try:
+            xy_deg = float(self.xy_angle.text())
+            z_deg = float(self.z_angle.text())
+            vel = float(self.velocity.text())
+            duration_time = float(self.duration.text())
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Input", "Please enter valid angle, velocity, and duration values!")
+            return
 
         self.xy_angle.clear()
         self.z_angle.clear()
         self.velocity.clear()
         self.duration.clear()
     
-        v_pitch = vel * math.cos(math.radians(z_deg)) * math.cos(math.radians(xy_deg))
-        v_roll = vel * math.cos(math.radians(z_deg)) * math.sin(math.radians(xy_deg))
-        v_throttle = vel * math.sin(math.radians(z_deg))
+        v_pitch, v_roll, v_throttle = velocity_from_angles(vel, xy_deg, z_deg)
 
+        self.node.twist.linear.x = v_pitch
         self.node.twist.linear.y = v_roll
         self.node.twist.linear.z = v_throttle
-        self.node.twist.linear.x = v_pitch
         self.node.twist.angular.z = 0.0
 
         self.node.get_logger().info(f"Velocity set: x={v_pitch:.2f}, y={v_roll:.2f}, z={v_throttle:.2f}")
