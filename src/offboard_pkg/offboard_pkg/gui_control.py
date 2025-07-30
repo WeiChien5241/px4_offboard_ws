@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 import sys
-from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton, QSlider, QLabel, QVBoxLayout, QWidget, QMessageBox, QGridLayout, QLineEdit
+from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton, QSlider, QLabel, QVBoxLayout, QWidget, QMessageBox, QGridLayout, QLineEdit, QHBoxLayout
 from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtGui import QPainter, QPen, QBrush, QFont
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
@@ -40,6 +41,79 @@ def arming_state_to_string(arming_state):
         1: "Disarmed",
         2: "Armed"
     }.get(arming_state, f"Unknown ({arming_state})")
+
+class ClickableCanvas(QWidget):
+    def __init__(self, width=640, height=480):
+        super().__init__()
+        self.canvas_height = height
+        self.canvas_width = width
+        self.setFixedSize(width, height)
+
+        self.click_x = None
+        self.click_y = None
+        self.center_x = self.canvas_width // 2
+        self.center_y = self.canvas_height // 2
+
+        self.HFOV_DEG = 60
+        self.VFOV_DEG = 45
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.click_x = event.x()
+            self.click_y = event.y()
+            self.update()
+
+            parent = self.parent()
+            while parent and not hasattr(parent, 'on_canvas_click'):
+                parent = parent.parent()
+            if parent:
+                parent.on_canvas_click()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        painter.setPen(QPen(Qt.lightGray, 1))
+        grid_size = 20
+        for x in range(0, self.canvas_width, grid_size):
+            painter.drawLine(x, 0, x, self.canvas_height)
+        for y in range(0, self.canvas_height, grid_size):
+            painter.drawLine(0, y, self.canvas_width, y)
+
+        painter.setPen(QPen(Qt.red, 2))
+        painter.drawLine(self.center_x, 0, self.center_x, self.canvas_height)
+        painter.drawLine(0, self.center_y, self.canvas_width, self.center_y)
+
+        painter.setBrush(QBrush(Qt.red))
+        painter.drawEllipse(self.center_x - 3, self.center_y - 3, 6, 6)
+
+        painter.setFont(QFont("Arial", 10))
+        painter.setPen(QPen(Qt.black, 1))
+        
+        # Horizontal angle labels
+        painter.drawText(10, self.center_y - 10, f"-{self.HFOV_DEG/2}°")
+        painter.drawText(self.canvas_width - 40, self.center_y - 10, f"+{self.HFOV_DEG/2}°")
+        
+        # Vertical angle labels
+        painter.drawText(self.center_x + 10, 20, f"+{self.VFOV_DEG/2}°")
+        painter.drawText(self.center_x + 10, self.canvas_height - 10, f"-{self.VFOV_DEG/2}°")
+
+        # Draw center label
+        painter.drawText(self.center_x + 10, self.center_y + 20, "Center (0°, 0°)")
+
+        if self.click_x is not None and self.click_y is not None:
+            painter.setBrush(QBrush(Qt.blue))
+            painter.setPen(QPen(Qt.blue, 2))
+            painter.drawEllipse(self.click_x - 5, self.click_y - 5, 10, 10)
+
+            offset_x = self.click_x - self.center_x
+            offset_y = self.click_y - self.center_y
+
+            angle_xy = (offset_x / (self.canvas_width / 2)) * (self.HFOV_DEG / 2)
+            angle_z = (offset_y / (self.canvas_height / 2)) * (self.VFOV_DEG / 2)
+
+            painter.drawText(self.click_x + 10, self.click_y - 10, f"({self.click_x}, {self.click_y})")
+            painter.drawText(self.click_x + 10, self.click_y + 10, f"XY: {angle_xy:.1f}°, Z: {angle_z:.1f}°")
 
 class DroneGUIControl(Node):
     def __init__(self):
@@ -159,6 +233,34 @@ class MainWindow(QMainWindow):
         self.land_button.setEnabled(False)
         layout.addWidget(self.land_button)
 
+        canvas_layout = QVBoxLayout()
+        canvas_layout.addWidget(QLabel("Clickable canvas - Click to set target coordinate:"))
+
+        self.canvas = ClickableCanvas(640, 480)
+        canvas_layout.addWidget(self.canvas, alignment=Qt.AlignCenter)
+
+        canvas_controls_layout = QHBoxLayout()
+
+        self.canvas_velocity = QLineEdit(self)
+        self.canvas_velocity.setPlaceholderText("Velocity (m/s)")
+        canvas_controls_layout.addWidget(self.canvas_velocity)
+
+        self.canvas_duration = QLineEdit(self)
+        self.canvas_duration.setPlaceholderText("Duration (s)")
+        canvas_controls_layout.addWidget(self.canvas_duration)
+
+        self.canvas_execute_button = QPushButton("Execute Canvas Target")
+        self.canvas_execute_button.clicked.connect(self.execute_canvas_target)
+        self.canvas_execute_button.setEnabled(False)
+        canvas_controls_layout.addWidget(self.canvas_execute_button)
+        
+        self.canvas_clear_button = QPushButton("Clear Target")
+        self.canvas_clear_button.clicked.connect(self.clear_canvas_target)
+        canvas_controls_layout.addWidget(self.canvas_clear_button)
+
+        canvas_layout.addLayout(canvas_controls_layout)
+        layout.addLayout(canvas_layout)
+
         rc_layout = QGridLayout()
 
         throttle_layout = QVBoxLayout()
@@ -260,6 +362,53 @@ class MainWindow(QMainWindow):
         self.coords_submit_button = QPushButton("Submit")
         self.coords_submit_button.clicked.connect(self.coords_submit)
         layout.addWidget(self.coords_submit_button)
+    
+    def on_canvas_click(self):
+        self.canvas_execute_button.setEnabled(True)
+
+    def clear_canvas_target(self):
+        self.canvas.click_x = None
+        self.canvas.click_y = None
+        self.canvas.update()
+        self.canvas_execute_button.setEnabled(False)
+
+    def execute_canvas_target(self):
+            
+        try:
+            canvas_vel = float(self.canvas_velocity.text())
+            canvas_duration_time = float(self.canvas_duration.text())
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Input", "Please enter valid velocity and duration values!")
+            return
+
+        target_x = self.canvas.click_x
+        target_y = self.canvas.click_y
+
+        IMAGE_WIDTH = 640
+        IMAGE_HEIGHT = 480
+        HFOV_DEG = 60
+        VFOV_DEG = 45
+        
+        cent_x = IMAGE_WIDTH / 2
+        cent_y = IMAGE_HEIGHT / 2
+        x_off = target_x - cent_x
+        y_off = target_y - cent_y
+
+        deg_xy = (x_off / (IMAGE_WIDTH / 2)) * (HFOV_DEG / 2)
+        deg_z = (y_off / (IMAGE_HEIGHT / 2)) * (VFOV_DEG / 2)
+
+        coord_v_pitch = canvas_vel * math.cos(math.radians(deg_z)) * math.cos(math.radians(deg_xy))
+        coord_v_roll = canvas_vel * math.cos(math.radians(deg_z)) * math.sin(math.radians(deg_xy))
+        coord_v_throttle = canvas_vel * math.sin(math.radians(deg_z))
+
+        self.node.twist.linear.y = coord_v_roll
+        self.node.twist.linear.z = coord_v_throttle
+        self.node.twist.linear.x = coord_v_pitch
+        self.node.twist.angular.z = 0.0
+
+        self.node.get_logger().info(f"Canvas target velocity set: x={coord_v_pitch:.2f}, y={coord_v_roll:.2f}, z={coord_v_throttle:.2f}")
+
+        QTimer.singleShot(int(canvas_duration_time * 1000), self.stop_velocity)
 
     def coords_submit(self):
         target_x_coord = float(self.x_coord.text())
@@ -297,6 +446,7 @@ class MainWindow(QMainWindow):
         self.node.get_logger().info(f"Velocity set: x={v_pitch_coord:.2f}, y={v_roll_coord:.2f}, z={v_throttle_coord:.2f}")
 
         QTimer.singleShot(int(coord_duration_time * 1000), self.stop_velocity)
+
     def submit(self):
         xy_deg = float(self.xy_angle.text())
         z_deg = float(self.z_angle.text())
