@@ -43,39 +43,49 @@ def arming_state_to_string(arming_state):
     }.get(arming_state, f"Unknown ({arming_state})")
 
 class ClickableCanvas(QWidget):
-    IMAGE_WIDTH = 640
-    IMAGE_HEIGHT = 480
+    ACTUAL_WIDTH = 1920
+    ACTUAL_HEIGHT = 1080
+    DISPLAY_WIDTH = 640
+    DISPLAY_HEIGHT = 360
     HFOV_DEG = 60
     VFOV_DEG = 45
 
-    def __init__(self, width=IMAGE_WIDTH, height=IMAGE_HEIGHT):
+    def __init__(self, width=DISPLAY_WIDTH, height=DISPLAY_HEIGHT):
         super().__init__()
-        self.canvas_height = height
-        self.canvas_width = width
+        self.display_height = height
+        self.display_width = width
         self.setFixedSize(width, height)
 
-        self.click_x = None
-        self.click_y = None
-        self.center_x = self.canvas_width // 2
-        self.center_y = self.canvas_height // 2
+        self.disp_x = None
+        self.disp_y = None
+        self.actual_x = None
+        self.actual_y = None
+        self.center_x = self.display_width // 2
+        self.center_y = self.display_height // 2
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            self.click_x = event.x()
-            self.click_y = event.y()
+            self.disp_x = event.x()
+            self.disp_y = event.y()
+            self.actual_x = int(self.disp_x * self.ACTUAL_WIDTH / self.display_width)
+            self.actual_y = int(self.disp_y * self.ACTUAL_HEIGHT / self.display_height)
             self.update()
 
-            parent = self.parent()
-            while parent and not hasattr(parent, 'on_canvas_click'):
-                parent = parent.parent()
-            if parent:
-                parent.on_canvas_click()
+            # parent = self.parent()
+            # while parent and not hasattr(parent, 'on_canvas_click'):
+            #     parent = parent.parent()
+            # if parent:
+            #     parent.on_canvas_click()
+
+            window = self.window()
+            if hasattr(window, 'on_canvas_click'):
+                window.on_canvas_click()
     
     def get_angles_from_pixel(self, x, y):
-        offset_x = x - self.center_x
-        offset_y = y - self.center_y
-        angle_xy = (offset_x / (self.canvas_width / 2)) * (self.HFOV_DEG / 2)
-        angle_z = -(offset_y / (self.canvas_height / 2)) * (self.VFOV_DEG / 2)
+        offset_x = x - self.ACTUAL_WIDTH // 2
+        offset_y = y - self.ACTUAL_HEIGHT // 2
+        angle_xy = (offset_x / (self.ACTUAL_WIDTH / 2)) * (self.HFOV_DEG / 2)
+        angle_z = -(offset_y / (self.ACTUAL_HEIGHT / 2)) * (self.VFOV_DEG / 2)
         return angle_xy, angle_z
 
     def paintEvent(self, event):
@@ -84,14 +94,14 @@ class ClickableCanvas(QWidget):
 
         painter.setPen(QPen(Qt.lightGray, 1))
         grid_size = 20
-        for x in range(0, self.canvas_width, grid_size):
-            painter.drawLine(x, 0, x, self.canvas_height)
-        for y in range(0, self.canvas_height, grid_size):
-            painter.drawLine(0, y, self.canvas_width, y)
+        for x in range(0, self.display_width, grid_size):
+            painter.drawLine(x, 0, x, self.display_height)
+        for y in range(0, self.display_height, grid_size):
+            painter.drawLine(0, y, self.display_width, y)
 
         painter.setPen(QPen(Qt.red, 2))
-        painter.drawLine(self.center_x, 0, self.center_x, self.canvas_height)
-        painter.drawLine(0, self.center_y, self.canvas_width, self.center_y)
+        painter.drawLine(self.center_x, 0, self.center_x, self.display_height)
+        painter.drawLine(0, self.center_y, self.display_width, self.center_y)
 
         painter.setBrush(QBrush(Qt.red))
         painter.drawEllipse(self.center_x - 3, self.center_y - 3, 6, 6)
@@ -101,22 +111,22 @@ class ClickableCanvas(QWidget):
         
         # Horizontal angle labels
         painter.drawText(10, self.center_y - 10, f"-{self.HFOV_DEG/2}°")
-        painter.drawText(self.canvas_width - 40, self.center_y - 10, f"+{self.HFOV_DEG/2}°")
+        painter.drawText(self.display_width - 40, self.center_y - 10, f"+{self.HFOV_DEG/2}°")
         
         # Vertical angle labels
         painter.drawText(self.center_x + 10, 20, f"+{self.VFOV_DEG/2}°")
-        painter.drawText(self.center_x + 10, self.canvas_height - 10, f"-{self.VFOV_DEG/2}°")
+        painter.drawText(self.center_x + 10, self.display_height - 10, f"-{self.VFOV_DEG/2}°")
 
         # Draw center label
         painter.drawText(self.center_x + 10, self.center_y + 20, "Center (0°, 0°)")
 
-        if self.click_x is not None and self.click_y is not None:
+        if self.disp_x is not None and self.disp_y is not None:
             painter.setBrush(QBrush(Qt.blue))
             painter.setPen(QPen(Qt.blue, 2))
-            painter.drawEllipse(self.click_x - 5, self.click_y - 5, 10, 10)
-            angle_xy, angle_z = self.get_angles_from_pixel(self.click_x, self.click_y)
-            painter.drawText(self.click_x + 10, self.click_y - 10, f"({self.click_x}, {self.click_y})")
-            painter.drawText(self.click_x + 10, self.click_y + 10, f"XY: {angle_xy:.1f}°, Z: {angle_z:.1f}°")
+            painter.drawEllipse(self.disp_x - 5, self.disp_y - 5, 10, 10)
+            angle_xy, angle_z = self.get_angles_from_pixel(self.actual_x, self.actual_y)
+            painter.drawText(self.disp_x + 10, self.disp_y - 10, f"({self.actual_x}, {self.actual_y})")
+            painter.drawText(self.disp_x + 10, self.disp_y + 10, f"XY: {angle_xy:.1f}°, Z: {angle_z:.1f}°")
 
 def velocity_from_angles(vel, angle_xy, angle_z):
     v_pitch = vel * math.cos(math.radians(angle_z)) * math.cos(math.radians(angle_xy))
@@ -389,8 +399,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Invalid Input", "Please enter valid velocity and duration values!")
             return
 
-        target_x = self.canvas.click_x
-        target_y = self.canvas.click_y
+        target_x = self.canvas.actual_x
+        target_y = self.canvas.actual_y
         
         angle_xy, angle_z = self.canvas.get_angles_from_pixel(target_x, target_y)
         v_pitch, v_roll, v_throttle = velocity_from_angles(canvas_vel, angle_xy, angle_z)
