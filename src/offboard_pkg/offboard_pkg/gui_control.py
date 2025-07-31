@@ -71,12 +71,6 @@ class ClickableCanvas(QWidget):
             self.actual_y = int(self.disp_y * self.ACTUAL_HEIGHT / self.display_height)
             self.update()
 
-            # parent = self.parent()
-            # while parent and not hasattr(parent, 'on_canvas_click'):
-            #     parent = parent.parent()
-            # if parent:
-            #     parent.on_canvas_click()
-
             window = self.window()
             if hasattr(window, 'on_canvas_click'):
                 window.on_canvas_click()
@@ -255,7 +249,7 @@ class MainWindow(QMainWindow):
         canvas_layout = QVBoxLayout()
         canvas_layout.addWidget(QLabel("Clickable canvas - Click to set target coordinate:"))
 
-        self.canvas = ClickableCanvas(640, 480)
+        self.canvas = ClickableCanvas(ClickableCanvas.DISPLAY_WIDTH, ClickableCanvas.DISPLAY_HEIGHT)
         canvas_layout.addWidget(self.canvas, alignment=Qt.AlignCenter)
 
         canvas_controls_layout = QHBoxLayout()
@@ -278,6 +272,19 @@ class MainWindow(QMainWindow):
         canvas_controls_layout.addWidget(self.canvas_clear_button)
 
         canvas_layout.addLayout(canvas_controls_layout)
+
+        self.velocity_display = QLabel("Velocity: x=0.00, y=0.00, z=0.00")
+        self.velocity_display.setAlignment(Qt.AlignCenter)
+        self.velocity_display.setStyleSheet("""
+            border: 2px solid black;
+            border-radius: 6px;
+            background: #f0f8ff;
+            padding: 3px;
+            font-weight: bold;
+            font-size: 12px;
+        """)
+        canvas_layout.addWidget(self.velocity_display)
+
         layout.addLayout(canvas_layout)
 
         rc_layout = QGridLayout()
@@ -324,63 +331,63 @@ class MainWindow(QMainWindow):
 
         layout.addLayout(rc_layout)
 
-        textbox_layout = QGridLayout()
+        # textbox_layout = QGridLayout()
 
-        self.xy_angle = QLineEdit(self)
-        self.xy_angle.setPlaceholderText("Enter angle (X)")
-        textbox_layout.addWidget(self.xy_angle, 0, 0)
+        # self.xy_angle = QLineEdit(self)
+        # self.xy_angle.setPlaceholderText("Enter angle (X)")
+        # textbox_layout.addWidget(self.xy_angle, 0, 0)
 
-        self.z_angle = QLineEdit(self)
-        self.z_angle.setPlaceholderText("Enter angle (Z)")
-        textbox_layout.addWidget(self.z_angle, 0, 1)
+        # self.z_angle = QLineEdit(self)
+        # self.z_angle.setPlaceholderText("Enter angle (Z)")
+        # textbox_layout.addWidget(self.z_angle, 0, 1)
 
-        self.velocity = QLineEdit(self)
-        self.velocity.setPlaceholderText("Enter velocity")
-        textbox_layout.addWidget(self.velocity, 0, 2)
+        # self.velocity = QLineEdit(self)
+        # self.velocity.setPlaceholderText("Enter velocity")
+        # textbox_layout.addWidget(self.velocity, 0, 2)
 
-        self.duration = QLineEdit(self)
-        self.duration.setPlaceholderText("Enter duration")
-        textbox_layout.addWidget(self.duration, 0, 3)
+        # self.duration = QLineEdit(self)
+        # self.duration.setPlaceholderText("Enter duration")
+        # textbox_layout.addWidget(self.duration, 0, 3)
 
-        self.xy_angle.setToolTip("Angle in XY plane (0°=forward, 90°=right, 180°=back)")
-        self.z_angle.setToolTip("Angle above XY plane (0°=flat, 90°=straight up)")
-        self.velocity.setToolTip("Speed magnitude in m/s")
-        self.duration.setToolTip("Duration in s")
+        # self.xy_angle.setToolTip("Angle in XY plane (0°=forward, 90°=right, 180°=back)")
+        # self.z_angle.setToolTip("Angle above XY plane (0°=flat, 90°=straight up)")
+        # self.velocity.setToolTip("Speed magnitude in m/s")
+        # self.duration.setToolTip("Duration in s")
         
-        layout.addLayout(textbox_layout)
+        # layout.addLayout(textbox_layout)
 
-        self.submit_button = QPushButton("Submit")
-        self.submit_button.clicked.connect(self.submit)
-        layout.addWidget(self.submit_button)
+        # self.submit_button = QPushButton("Submit")
+        # self.submit_button.clicked.connect(self.submit)
+        # layout.addWidget(self.submit_button)
 
-        coords_textbox_layout = QGridLayout()
+        # coords_textbox_layout = QGridLayout()
 
-        self.x_coord = QLineEdit(self)
-        self.x_coord.setPlaceholderText("Enter coordinate (X)")
-        coords_textbox_layout.addWidget(self.x_coord, 0, 0)
+        # self.x_coord = QLineEdit(self)
+        # self.x_coord.setPlaceholderText("Enter coordinate (X)")
+        # coords_textbox_layout.addWidget(self.x_coord, 0, 0)
 
-        self.y_coord = QLineEdit(self)
-        self.y_coord.setPlaceholderText("Enter coordinate (Y)")
-        coords_textbox_layout.addWidget(self.y_coord, 0, 1)
+        # self.y_coord = QLineEdit(self)
+        # self.y_coord.setPlaceholderText("Enter coordinate (Y)")
+        # coords_textbox_layout.addWidget(self.y_coord, 0, 1)
 
-        self.coords_velocity = QLineEdit(self)
-        self.coords_velocity.setPlaceholderText("Enter velocity")
-        coords_textbox_layout.addWidget(self.coords_velocity, 0, 2)
+        # self.coords_velocity = QLineEdit(self)
+        # self.coords_velocity.setPlaceholderText("Enter velocity")
+        # coords_textbox_layout.addWidget(self.coords_velocity, 0, 2)
 
-        self.coords_duration = QLineEdit(self)
-        self.coords_duration.setPlaceholderText("Enter duration")
-        coords_textbox_layout.addWidget(self.coords_duration, 0, 3)
+        # self.coords_duration = QLineEdit(self)
+        # self.coords_duration.setPlaceholderText("Enter duration")
+        # coords_textbox_layout.addWidget(self.coords_duration, 0, 3)
 
-        self.x_coord.setToolTip("Coordinate in X (0-640)")
-        self.y_coord.setToolTip("Coordinate in Y (0-480)")
-        self.coords_velocity.setToolTip("Speed magnitude in m/s")
-        self.coords_duration.setToolTip("Duration in s")
+        # self.x_coord.setToolTip("Coordinate in X (0-640)")
+        # self.y_coord.setToolTip("Coordinate in Y (0-480)")
+        # self.coords_velocity.setToolTip("Speed magnitude in m/s")
+        # self.coords_duration.setToolTip("Duration in s")
         
-        layout.addLayout(coords_textbox_layout)
+        # layout.addLayout(coords_textbox_layout)
 
-        self.coords_submit_button = QPushButton("Submit")
-        self.coords_submit_button.clicked.connect(self.coords_submit)
-        layout.addWidget(self.coords_submit_button)
+        # self.coords_submit_button = QPushButton("Submit")
+        # self.coords_submit_button.clicked.connect(self.coords_submit)
+        # layout.addWidget(self.coords_submit_button)
     
     def on_canvas_click(self):
         self.canvas_execute_button.setEnabled(True)
@@ -411,10 +418,11 @@ class MainWindow(QMainWindow):
         self.node.twist.angular.z = 0.0
 
         self.node.get_logger().info(f"Canvas target velocity set: x={v_pitch:.2f}, y={v_roll:.2f}, z={v_throttle:.2f}")
+        self.velocity_display.setText(f"Velocity: x={v_pitch:.2f}, y={v_roll:.2f}, z={v_throttle:.2f}")
 
         QTimer.singleShot(int(canvas_duration_time * 1000), self.stop_velocity)
 
-    def coords_submit(self):
+    # def coords_submit(self):
         try:
             target_x_coord = float(self.x_coord.text())
             target_y_coord = float(self.y_coord.text())
@@ -441,7 +449,7 @@ class MainWindow(QMainWindow):
 
         QTimer.singleShot(int(coord_duration_time * 1000), self.stop_velocity)
 
-    def submit(self):
+    # def submit(self):
         try:
             xy_deg = float(self.xy_angle.text())
             z_deg = float(self.z_angle.text())
