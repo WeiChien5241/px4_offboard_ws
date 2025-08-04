@@ -13,7 +13,7 @@ import threading
 def velocity_from_angles(vel, angle_xy, angle_z):
     v_forward = vel * math.cos(math.radians(angle_z)) * math.cos(math.radians(angle_xy))
     v_right = vel * math.cos(math.radians(angle_z)) * math.sin(math.radians(angle_xy))
-    v_down = vel * math.sin(math.radians(angle_z))
+    v_down = -(vel * math.sin(math.radians(angle_z)))
     return v_forward, v_right, v_down
 
 class DroneControl:
@@ -44,6 +44,11 @@ class DroneControl:
             if health.is_global_position_ok:
                 print("-- Global position estimate OK")
                 break
+    
+    async def monitor_landed(self):
+        async for landed in self.drone.telemetry.landed_state():
+            self.is_landed = (landed == "LANDED")
+            self.update_gui_state()
 
     async def monitor_armed(self):
         async for armed in self.drone.telemetry.armed():
@@ -53,7 +58,6 @@ class DroneControl:
     async def monitor_flight_mode(self):
         async for mode in self.drone.telemetry.flight_mode():
             self.flight_mode = mode
-            # self.is_landed = mode in [FlightMode.HOLD, FlightMode.LAND]
             self.update_gui_state()
 
     async def monitor_attitude(self):
@@ -64,6 +68,8 @@ class DroneControl:
         """Run state machine for drone control."""
         while True:
             if self.current_state == "IDLE":
+                if self.window.arm_requested ==  False and self.is_armed == False:
+                    await self.drone.action.hold()
                 if self.window and self.window.arm_requested:
                     self.current_state = "ARMING"
                     print(("Switch from idle to arming"))
@@ -72,13 +78,15 @@ class DroneControl:
                 if self.is_armed:
                     self.current_state = "TAKEOFF"
                     print("Switch from arming into takeoff")
-                await self.arm_drone()
+                else:
+                    await self.arm_drone()
 
             elif self.current_state == "TAKEOFF":
                 if self.flight_mode == FlightMode.TAKEOFF:
                     self.current_state = "LOITER"
                     print("Switching to loiter mode")
-                await self.takeoff()
+                else:
+                    await self.takeoff()
 
             elif self.current_state == "LOITER":
                 if self.flight_mode == FlightMode.HOLD:
@@ -96,7 +104,8 @@ class DroneControl:
                     await self.send_velocity()
 
             elif self.current_state == "LANDING":
-                await self.drone.action.land()
+                if not self.is_landed:
+                    await self.drone.action.land()
                 if not self.is_armed:
                     print("Landing complete, returning to IDLE")
                     self.current_state = "IDLE"
@@ -112,6 +121,8 @@ class DroneControl:
             except Exception as e:
                 print(f"Arming failed: {e}")
                 self.current_state = "IDLE"
+                if self.window:
+                    self.window.arm_requested = False
 
     async def takeoff(self):
         if self.is_armed and self.flight_mode != FlightMode.TAKEOFF:
@@ -122,6 +133,8 @@ class DroneControl:
             except Exception as e:
                 print(f"Takeoff failed: {e}")
                 self.current_state = "IDLE"
+                if self.window:
+                    self.window.arm_requested = False   
 
     async def start_offboard(self):
         try:
@@ -130,18 +143,18 @@ class DroneControl:
         except OffboardError as e:
             print(f"Starting offboard failed: {e}")
             self.current_state = "IDLE"
+            if self.window:
+                    self.window.arm_requested = False
 
     async def send_velocity(self):
-        """Send velocity commands in body frame."""
-        cos_yaw = np.cos(self.true_yaw)
-        sin_yaw = np.sin(self.true_yaw)
-        # Convert world-frame (NED) to body-frame (FRD)
-        vel_forward = self.velocity[0] * cos_yaw - self.velocity[1] * sin_yaw
-        vel_right = self.velocity[0] * sin_yaw + self.velocity[1] * cos_yaw
+        vel_forward = self.velocity[0]
+        vel_right = self.velocity[1]
         vel_down = self.velocity[2]
+        yaw_rate_body = self.yaw_rate
+
         try:
             await self.drone.offboard.set_velocity_body(
-                VelocityBodyYawspeed(vel_forward, vel_right, vel_down, self.yaw_rate)
+                VelocityBodyYawspeed(vel_forward, vel_right, vel_down, yaw_rate_body)
             )
         except OffboardError as e:
             print(f"Velocity command failed: {e}")
@@ -299,8 +312,8 @@ class MainWindow(QMainWindow):
 
     def update_velocity(self):
         self.drone_control.velocity = [
-            (self.roll_slider.value() / 50.0),  # X (forward)
-            -(self.pitch_slider.value() / 50.0),   # Y (right)
+            (self.pitch_slider.value() / 50.0),  # X (forward)
+            (self.roll_slider.value() / 50.0),   # Y (right)
             -(self.throttle_slider.value() / 100.0)  # Z (down)
         ]
         self.drone_control.yaw_rate = self.yaw_slider.value() / 100.0
@@ -314,7 +327,8 @@ class MainWindow(QMainWindow):
 
     def land_logic(self):
         self.drone_control.landing_initiated = True
-        print("Land command sent")
+        print("Land command sent, switching to land mode")
+        self.arm_requested = False
 
 def run_asyncio_loop(loop):
     asyncio.set_event_loop(loop)
@@ -326,6 +340,7 @@ async def start_drone_control(drone_control):
         drone_control.monitor_armed(),
         drone_control.monitor_flight_mode(),
         drone_control.monitor_attitude(),
+        drone_control.monitor_landed(),
         drone_control.state_machine()
     )
 
