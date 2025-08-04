@@ -53,7 +53,7 @@ class DroneControl:
     async def monitor_flight_mode(self):
         async for mode in self.drone.telemetry.flight_mode():
             self.flight_mode = mode
-            self.is_landed = mode in [FlightMode.HOLD, FlightMode.LAND]
+            # self.is_landed = mode in [FlightMode.HOLD, FlightMode.LAND]
             self.update_gui_state()
 
     async def monitor_attitude(self):
@@ -64,54 +64,48 @@ class DroneControl:
         """Run state machine for drone control."""
         while True:
             if self.current_state == "IDLE":
-                # if self.is_armed:
-                #     self.current_state = "ARMING"
-                #     print("Switch to ARMING")
                 if self.window and self.window.arm_requested:
                     self.current_state = "ARMING"
-                    # await self.arm_drone(True)
+                    print(("Switch from idle to arming"))
 
             elif self.current_state == "ARMING":
                 if self.is_armed:
                     self.current_state = "TAKEOFF"
-                    print("Switch to TAKEOFF")
-                await self.arm_drone(True)
+                    print("Switch from arming into takeoff")
+                await self.arm_drone()
 
             elif self.current_state == "TAKEOFF":
-                # print(f"current flight mode: {self.flight_mode}")
                 if self.flight_mode == FlightMode.TAKEOFF:
                     self.current_state = "LOITER"
-                await self.arm_drone(True)
+                    print("Switching to loiter mode")
                 await self.takeoff()
-                # if self.flight_mode  == FlightMode.HOLD:
-                #     self.current_state = "OFFBOARD"
-                #     await self.start_offboard()
-                #     print("Switch to OFFBOARD")
 
             elif self.current_state == "LOITER":
                 if self.flight_mode == FlightMode.HOLD:
                     self.current_state = "OFFBOARD"
-                    await self.start_offboard()
-                await self.arm_drone(True)
+                    self.offboard_active = True
+                    print("Switching to offboard mode")
 
             elif self.current_state == "OFFBOARD":
                 if self.landing_initiated or self.flight_mode == FlightMode.LAND:
+                    print("Landing detected, switching to LANDING state")
                     self.current_state = "LANDING"
                     self.offboard_active = False
-                    print("Switch to LANDING")
                 elif self.offboard_active:
+                    await self.start_offboard()
                     await self.send_velocity()
 
             elif self.current_state == "LANDING":
                 await self.drone.action.land()
                 if not self.is_armed:
+                    print("Landing complete, returning to IDLE")
                     self.current_state = "IDLE"
                     self.landing_initiated = False
-                    print("Switch to IDLE")
+                    
             await asyncio.sleep(0.02)  # 50 Hz
 
-    async def arm_drone(self, arm):
-        if arm and not self.is_armed:
+    async def arm_drone(self):
+        if not self.is_armed:
             try:
                 await self.drone.action.arm()
                 print("Arming drone")
@@ -120,20 +114,19 @@ class DroneControl:
                 self.current_state = "IDLE"
 
     async def takeoff(self):
-        try:
-            await self.drone.action.set_takeoff_altitude(5.0)
-            await self.drone.action.takeoff()
-            print("Takeoff command sent")
-        except Exception as e:
-            print(f"Takeoff failed: {e}")
-            self.current_state = "IDLE"
+        if self.is_armed and self.flight_mode != FlightMode.TAKEOFF:
+            try:
+                await self.drone.action.set_takeoff_altitude(5.0)
+                await self.drone.action.takeoff()
+                print("Takeoff command sent")
+            except Exception as e:
+                print(f"Takeoff failed: {e}")
+                self.current_state = "IDLE"
 
     async def start_offboard(self):
         try:
             await self.drone.offboard.set_velocity_body(VelocityBodyYawspeed(0.0, 0.0, 0.0, 0.0))
             await self.drone.offboard.start()
-            self.offboard_active = True
-            print("Offboard mode started")
         except OffboardError as e:
             print(f"Starting offboard failed: {e}")
             self.current_state = "IDLE"
@@ -160,7 +153,7 @@ class DroneControl:
         if self.is_armed and not self.is_landed:
             self.window.arm_button.setText("Armed")
             self.window.arm_button.setEnabled(False)
-            if self.current_state == "LANDING":
+            if self.flight_mode == FlightMode.LAND:
                 self.window.land_button.setText("Landing...")
                 self.window.land_button.setEnabled(False)
             else:
@@ -306,9 +299,9 @@ class MainWindow(QMainWindow):
 
     def update_velocity(self):
         self.drone_control.velocity = [
-            self.pitch_slider.value() / 50.0,  # X (forward)
-            self.roll_slider.value() / 50.0,   # Y (right)
-            self.throttle_slider.value() / 100.0  # Z (down)
+            (self.roll_slider.value() / 50.0),  # X (forward)
+            -(self.pitch_slider.value() / 50.0),   # Y (right)
+            -(self.throttle_slider.value() / 100.0)  # Z (down)
         ]
         self.drone_control.yaw_rate = self.yaw_slider.value() / 100.0
 
@@ -317,7 +310,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Arming Error", "Drone is already armed!")
         else:
             self.arm_requested = True
-            print("Arm button pressed, arming...")
+            print("Arm request sent")
 
     def land_logic(self):
         self.drone_control.landing_initiated = True
