@@ -41,7 +41,7 @@ def arming_state_to_string(arming_state):
 class OffboardControl(Node):
 
     def __init__(self):
-        super().__init__('vel_ctrl_v4')
+        super().__init__('vel_ctrl')
         qos_profile = QoSProfile(
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
             durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
@@ -59,7 +59,7 @@ class OffboardControl(Node):
         self.publisher_trajectory = self.create_publisher(TrajectorySetpoint, '/fmu/in/trajectory_setpoint', qos_profile)
         self.vehicle_command_publisher_ = self.create_publisher(VehicleCommand, "/fmu/in/vehicle_command", 10)
 
-        self.arm_timer_ = self.create_timer(0.1, self.arm_timer_callback)
+        self.arm_timer_ = self.create_timer(0.1, self.state_machine)
         self.timer = self.create_timer(0.02, self.cmdloop_callback)
 
         self.nav_state = VehicleStatus.NAVIGATION_STATE_MAX
@@ -92,7 +92,7 @@ class OffboardControl(Node):
             self.allow_offboard_switch = True
             self.landing_initiated = False
 
-    def arm_timer_callback(self):
+    def state_machine(self):
         match self.current_state:
             case "IDLE":
                 self.offboardMode = False
@@ -245,6 +245,7 @@ def main(args=None):
     rclpy.init(args=args)
     node = OffboardControl()
     rclpy.spin(node)
+    print("Hi hihihihh")
     node.destroy_node()
     rclpy.shutdown()
 
