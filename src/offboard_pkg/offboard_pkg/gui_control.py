@@ -141,12 +141,13 @@ class DroneGUIControl(Node):
         self.vel_pub = self.create_publisher(Twist, 'offboard_velocity_cmd', qos)
         self.arm_pub = self.create_publisher(Bool, '/arm_message', qos)
         self.cmd_pub = self.create_publisher(VehicleCommand, '/fmu/in/vehicle_command', 10)
+        self.hold_request_pub = self.create_publisher(Bool, '/hold_request', qos)
         self.rtl_request_pub = self.create_publisher(Bool, '/rtl_request', qos)
         # added publisher to stop offboard when switching to land
         self.stop_offboard_pub = self.create_publisher(Bool, '/stop_offboard', qos)
 
         # if using real drone, use vehicle status without v1
-        #self.status_sub = self.create_subscription(VehicleStatus, '/fmu/out/vehicle_status', self.vehicle_status_callback, qos_profile)
+        #self.status_sub = self.create_subscription(VehicleStatus, '/fmu/out/vehicle_status', self.status_callback, qos)
         # if using SITL, use vehicle status with v1
         self.status_sub = self.create_subscription(VehicleStatus, '/fmu/out/vehicle_status_v1', self.status_callback, qos)
         # Add subscription for land detection
@@ -197,6 +198,7 @@ class DroneGUIControl(Node):
             # Drone is armed and airborne - enable land button, disable arm button
             self.window.arm_button.setText("Armed")
             self.window.arm_button.setEnabled(False)
+            self.window.hold_button.setEnabled(True)
             if self.current_status.nav_state == VehicleStatus.NAVIGATION_STATE_AUTO_LAND or self.current_status.nav_state == VehicleStatus.NAVIGATION_STATE_AUTO_RTL:
                 self.window.land_button.setText("Landing...")
                 self.window.land_button.setEnabled(False)
@@ -212,12 +214,14 @@ class DroneGUIControl(Node):
             self.window.land_button.setText("Land and Disarm")
             self.window.land_button.setEnabled(False)
             self.window.rtl_button.setEnabled(False)
+            self.window.hold_button.setEnabled(False)
         else:
             # Default state
             self.window.arm_button.setText("Arm and Takeoff")
             self.window.arm_button.setEnabled(is_disarmed)
             self.window.land_button.setEnabled(False)
             self.window.rtl_button.setEnabled(False)
+            self.window.hold_button.setEnabled(False)
 
     def arm_drone(self, arm):
         if arm:
@@ -245,23 +249,28 @@ class MainWindow(QMainWindow):
         widget.setLayout(layout)
         self.setCentralWidget(widget)
 
-        arm_land_layout = QHBoxLayout()
+        mode_button_layout = QGridLayout()
         
         self.arm_button = QPushButton("Arm and Takeoff")
         self.arm_button.clicked.connect(self.arm_logic)
-        arm_land_layout.addWidget(self.arm_button)
+        mode_button_layout.addWidget(self.arm_button, 0, 0)
 
         self.land_button = QPushButton("Land and Disarm")
         self.land_button.clicked.connect(self.land_logic)
         self.land_button.setEnabled(False)
-        arm_land_layout.addWidget(self.land_button)
+        mode_button_layout.addWidget(self.land_button, 0, 1)
 
-        layout.addLayout(arm_land_layout)
+        self.hold_button = QPushButton("Hold Mode")
+        self.hold_button.clicked.connect(self.hold_logic)
+        self.hold_button.setEnabled(False)
+        mode_button_layout.addWidget(self.hold_button, 1, 0)
 
         self.rtl_button = QPushButton("Return to Launch (RTL)")
         self.rtl_button.clicked.connect(self.return_to_launch)
         self.rtl_button.setEnabled(False)
-        layout.addWidget(self.rtl_button)
+        mode_button_layout.addWidget(self.rtl_button, 1, 1)
+
+        layout.addLayout(mode_button_layout)
 
         canvas_layout = QVBoxLayout()
         canvas_layout.addWidget(QLabel("Clickable canvas - Click to set target coordinate:"))
@@ -527,6 +536,10 @@ class MainWindow(QMainWindow):
     def return_to_launch(self):
         self.node.rtl_request_pub.publish(Bool(data=True))
         self.node.get_logger().info("Return to Launch (RTL) command sent")
+    
+    def hold_logic(self):
+        self.node.hold_request_pub.publish(Bool(data=True))
+        self.node.get_logger().info("Switch to Hold Mode command sent")
 
 def main():
     rclpy.init()
