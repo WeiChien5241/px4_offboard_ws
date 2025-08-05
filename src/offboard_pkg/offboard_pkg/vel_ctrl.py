@@ -1,5 +1,4 @@
-#!/usr/bin/env python
-
+#!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
 import numpy as np
@@ -49,10 +48,14 @@ class OffboardControl(Node):
             depth=1
         )
 
+        # if using real drone, use vehicle status without v1
+        #self.status_sub = self.create_subscription(VehicleStatus, '/fmu/out/vehicle_status', self.vehicle_status_callback, qos_profile)
+        # if using SITL, use vehicle status with v1
         self.status_sub = self.create_subscription(VehicleStatus, '/fmu/out/vehicle_status_v1', self.vehicle_status_callback, qos_profile)
         self.offboard_velocity_sub = self.create_subscription(Twist, '/offboard_velocity_cmd', self.offboard_velocity_callback, qos_profile)
         self.attitude_sub = self.create_subscription(VehicleAttitude, '/fmu/out/vehicle_attitude', self.attitude_callback, qos_profile)
         self.arm_sub = self.create_subscription(Bool, '/arm_message', self.arm_message_callback, qos_profile)
+        self.rtl_sub = self.create_subscription(Bool, '/rtl_request', self.rtl_request_callback, qos_profile)
         self.stop_offboard_sub = self.create_subscription(Bool, '/stop_offboard', self.stop_offboard_callback, qos_profile)
 
         self.publisher_offboard_mode = self.create_publisher(OffboardControlMode, '/fmu/in/offboard_control_mode', qos_profile)
@@ -76,6 +79,20 @@ class OffboardControl(Node):
         self.last_state = self.current_state
         self.allow_offboard_switch = True 
         self.landing_initiated = False
+        self.rtl_request = False
+
+    
+    def rtl_request_callback(self, msg):
+        if msg.data:
+            self.rtl_request = True
+            self.get_logger().info("RTL requested by GUI.")
+            # if self.current_state == "OFFBOARD":
+            #     self.allow_offboard_switch = False
+            #     self.offboardMode = False
+            #     self.landing_initiated = True
+            #     self.get_logger().info("Switching to landing due to RTL request.")
+            # else:
+            #     self.get_logger().info("RTL request received but not in OFFBOARD mode, ignoring.")
 
     def stop_offboard_callback(self, msg):
         if msg.data:
@@ -96,9 +113,10 @@ class OffboardControl(Node):
         match self.current_state:
             case "IDLE":
                 self.offboardMode = False
+                externally_armed = self.arm_state == VehicleStatus.ARMING_STATE_ARMED and not self.arm_message
                 if self.arm_message == False and self.arm_state != VehicleStatus.ARMING_STATE_ARMED:
                     self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_DO_SET_MODE, 1., 3.)
-                if self.flightCheck and self.arm_message:
+                if self.flightCheck and (self.arm_message or externally_armed):
                     self.current_state = "ARMING"
                     self.get_logger().info("Switch from idle to arming")
 
@@ -131,9 +149,16 @@ class OffboardControl(Node):
                 self.arm()
 
             case "OFFBOARD":
-                if not self.flightCheck or self.arm_state != VehicleStatus.ARMING_STATE_ARMED or self.failsafe:
+                if self.rtl_request:
+                    self.offboardMode = False
+                    self.allow_offboard_switch = False
+                    self.get_logger().info("RTL requested, switching to RTL state")
+                    self.current_state = "LANDING"
+                elif not self.flightCheck or self.arm_state != VehicleStatus.ARMING_STATE_ARMED or self.failsafe:
+                    self.offboardMode = False
+                    self.allow_offboard_switch = False
                     self.current_state = "IDLE"
-                    self.get_logger().info("Offboard, Flight Check Failed")
+                    self.get_logger().info("Flight Check Failed, switching to IDLE")
                 elif self.landing_initiated or self.nav_state == VehicleStatus.NAVIGATION_STATE_AUTO_LAND:
                     self.get_logger().info("Landing detected, switching to LANDING state")
                     self.offboardMode = False
@@ -143,8 +168,12 @@ class OffboardControl(Node):
                     self.state_offboard()
 
             case "LANDING":
-                self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_NAV_LAND)
+                if self.rtl_request:
+                    self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_NAV_RETURN_TO_LAUNCH)
+                else:
+                    self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_NAV_LAND)
                 if self.arm_state == VehicleStatus.ARMING_STATE_DISARMED:
+                    self.rtl_request = False
                     self.get_logger().info("Landing complete, returning to IDLE")
                     self.landing_initiated = False
                     self.current_state = "IDLE"

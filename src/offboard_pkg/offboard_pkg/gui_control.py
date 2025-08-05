@@ -141,9 +141,13 @@ class DroneGUIControl(Node):
         self.vel_pub = self.create_publisher(Twist, 'offboard_velocity_cmd', qos)
         self.arm_pub = self.create_publisher(Bool, '/arm_message', qos)
         self.cmd_pub = self.create_publisher(VehicleCommand, '/fmu/in/vehicle_command', 10)
+        self.rtl_request_pub = self.create_publisher(Bool, '/rtl_request', qos)
         # added publisher to stop offboard when switching to land
         self.stop_offboard_pub = self.create_publisher(Bool, '/stop_offboard', qos)
 
+        # if using real drone, use vehicle status without v1
+        #self.status_sub = self.create_subscription(VehicleStatus, '/fmu/out/vehicle_status', self.vehicle_status_callback, qos_profile)
+        # if using SITL, use vehicle status with v1
         self.status_sub = self.create_subscription(VehicleStatus, '/fmu/out/vehicle_status_v1', self.status_callback, qos)
         # Add subscription for land detection
         self.land_detected_sub = self.create_subscription(VehicleLandDetected, '/fmu/out/vehicle_land_detected', self.land_detected_callback, qos)
@@ -193,23 +197,27 @@ class DroneGUIControl(Node):
             # Drone is armed and airborne - enable land button, disable arm button
             self.window.arm_button.setText("Armed")
             self.window.arm_button.setEnabled(False)
-            if self.current_status.nav_state == VehicleStatus.NAVIGATION_STATE_AUTO_LAND:
+            if self.current_status.nav_state == VehicleStatus.NAVIGATION_STATE_AUTO_LAND or self.current_status.nav_state == VehicleStatus.NAVIGATION_STATE_AUTO_RTL:
                 self.window.land_button.setText("Landing...")
                 self.window.land_button.setEnabled(False)
+                self.window.rtl_button.setEnabled(False)
             else:
                 self.window.land_button.setText("Land and Disarm")
                 self.window.land_button.setEnabled(True)
+                self.window.rtl_button.setEnabled(True)
         elif is_disarmed and self.is_landed:
             # Drone is disarmed and landed - ready for next flight
             self.window.arm_button.setText("Arm and Takeoff")
             self.window.arm_button.setEnabled(True)
             self.window.land_button.setText("Land and Disarm")
             self.window.land_button.setEnabled(False)
+            self.window.rtl_button.setEnabled(False)
         else:
             # Default state
             self.window.arm_button.setText("Arm and Takeoff")
             self.window.arm_button.setEnabled(is_disarmed)
             self.window.land_button.setEnabled(False)
+            self.window.rtl_button.setEnabled(False)
 
     def arm_drone(self, arm):
         if arm:
@@ -236,15 +244,24 @@ class MainWindow(QMainWindow):
         widget = QWidget()
         widget.setLayout(layout)
         self.setCentralWidget(widget)
+
+        arm_land_layout = QHBoxLayout()
         
         self.arm_button = QPushButton("Arm and Takeoff")
         self.arm_button.clicked.connect(self.arm_logic)
-        layout.addWidget(self.arm_button)
+        arm_land_layout.addWidget(self.arm_button)
 
         self.land_button = QPushButton("Land and Disarm")
         self.land_button.clicked.connect(self.land_logic)
         self.land_button.setEnabled(False)
-        layout.addWidget(self.land_button)
+        arm_land_layout.addWidget(self.land_button)
+
+        layout.addLayout(arm_land_layout)
+
+        self.rtl_button = QPushButton("Return to Launch (RTL)")
+        self.rtl_button.clicked.connect(self.return_to_launch)
+        self.rtl_button.setEnabled(False)
+        layout.addWidget(self.rtl_button)
 
         canvas_layout = QVBoxLayout()
         canvas_layout.addWidget(QLabel("Clickable canvas - Click to set target coordinate:"))
@@ -388,7 +405,7 @@ class MainWindow(QMainWindow):
         # self.coords_submit_button = QPushButton("Submit")
         # self.coords_submit_button.clicked.connect(self.coords_submit)
         # layout.addWidget(self.coords_submit_button)
-    
+        
     def on_canvas_click(self):
         self.canvas_execute_button.setEnabled(True)
 
@@ -423,57 +440,57 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(int(canvas_duration_time * 1000), self.stop_velocity)
 
     # def coords_submit(self):
-        # try:
-        #     target_x_coord = float(self.x_coord.text())
-        #     target_y_coord = float(self.y_coord.text())
-        #     coord_vel = float(self.coords_velocity.text())
-        #     coord_duration_time = float(self.coords_duration.text())
-        # except ValueError:
-        #     QMessageBox.warning(self, "Invalid Input", "Please enter valid coordinate, velocity, and duration values!")
-        #     return
+        try:
+            target_x_coord = float(self.x_coord.text())
+            target_y_coord = float(self.y_coord.text())
+            coord_vel = float(self.coords_velocity.text())
+            coord_duration_time = float(self.coords_duration.text())
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Input", "Please enter valid coordinate, velocity, and duration values!")
+            return
         
-        # self.x_coord.clear()
-        # self.y_coord.clear()
-        # self.coords_velocity.clear()
-        # self.coords_duration.clear()
+        self.x_coord.clear()
+        self.y_coord.clear()
+        self.coords_velocity.clear()
+        self.coords_duration.clear()
 
-        # angle_xy, angle_z = self.canvas.get_angles_from_pixel(target_x_coord, target_y_coord)
-        # v_pitch, v_roll, v_throttle = velocity_from_angles(coord_vel, angle_xy, angle_z)
+        angle_xy, angle_z = self.canvas.get_angles_from_pixel(target_x_coord, target_y_coord)
+        v_pitch, v_roll, v_throttle = velocity_from_angles(coord_vel, angle_xy, angle_z)
 
-        # self.node.twist.linear.x = v_pitch
-        # self.node.twist.linear.y = v_roll
-        # self.node.twist.linear.z = v_throttle
-        # self.node.twist.angular.z = 0.0
+        self.node.twist.linear.x = v_pitch
+        self.node.twist.linear.y = v_roll
+        self.node.twist.linear.z = v_throttle
+        self.node.twist.angular.z = 0.0
 
-        # self.node.get_logger().info(f"Velocity set: x={v_pitch:.2f}, y={v_roll:.2f}, z={v_throttle:.2f}")
+        self.node.get_logger().info(f"Velocity set: x={v_pitch:.2f}, y={v_roll:.2f}, z={v_throttle:.2f}")
 
-        # QTimer.singleShot(int(coord_duration_time * 1000), self.stop_velocity)
+        QTimer.singleShot(int(coord_duration_time * 1000), self.stop_velocity)
 
     # def submit(self):
-        # try:
-        #     xy_deg = float(self.xy_angle.text())
-        #     z_deg = float(self.z_angle.text())
-        #     vel = float(self.velocity.text())
-        #     duration_time = float(self.duration.text())
-        # except ValueError:
-        #     QMessageBox.warning(self, "Invalid Input", "Please enter valid angle, velocity, and duration values!")
-        #     return
+        try:
+            xy_deg = float(self.xy_angle.text())
+            z_deg = float(self.z_angle.text())
+            vel = float(self.velocity.text())
+            duration_time = float(self.duration.text())
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Input", "Please enter valid angle, velocity, and duration values!")
+            return
 
-        # self.xy_angle.clear()
-        # self.z_angle.clear()
-        # self.velocity.clear()
-        # self.duration.clear()
+        self.xy_angle.clear()
+        self.z_angle.clear()
+        self.velocity.clear()
+        self.duration.clear()
     
-        # v_pitch, v_roll, v_throttle = velocity_from_angles(vel, xy_deg, z_deg)
+        v_pitch, v_roll, v_throttle = velocity_from_angles(vel, xy_deg, z_deg)
 
-        # self.node.twist.linear.x = v_pitch
-        # self.node.twist.linear.y = v_roll
-        # self.node.twist.linear.z = v_throttle
-        # self.node.twist.angular.z = 0.0
+        self.node.twist.linear.x = v_pitch
+        self.node.twist.linear.y = v_roll
+        self.node.twist.linear.z = v_throttle
+        self.node.twist.angular.z = 0.0
 
-        # self.node.get_logger().info(f"Velocity set: x={v_pitch:.2f}, y={v_roll:.2f}, z={v_throttle:.2f}")
+        self.node.get_logger().info(f"Velocity set: x={v_pitch:.2f}, y={v_roll:.2f}, z={v_throttle:.2f}")
 
-        # QTimer.singleShot(int(duration_time * 1000), self.stop_velocity)
+        QTimer.singleShot(int(duration_time * 1000), self.stop_velocity)
     
     def stop_velocity(self):
         self.node.twist.linear.x = 0.0
@@ -506,6 +523,10 @@ class MainWindow(QMainWindow):
 
     def land_logic(self):
         self.node.land_drone()
+
+    def return_to_launch(self):
+        self.node.rtl_request_pub.publish(Bool(data=True))
+        self.node.get_logger().info("Return to Launch (RTL) command sent")
 
 def main():
     rclpy.init()
