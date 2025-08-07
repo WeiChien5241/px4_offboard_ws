@@ -143,19 +143,19 @@ class DroneGUIControl(Node):
         self.cmd_pub = self.create_publisher(VehicleCommand, '/fmu/in/vehicle_command', 10)
         self.hold_request_pub = self.create_publisher(Bool, '/hold_request', qos)
         self.rtl_request_pub = self.create_publisher(Bool, '/rtl_request', qos)
-        # added publisher to stop offboard when switching to land
+        self.offboard_request_pub = self.create_publisher(Bool, '/offboard_request', qos)
         self.stop_offboard_pub = self.create_publisher(Bool, '/stop_offboard', qos)
 
         # if using real drone, use vehicle status without v1
         #self.status_sub = self.create_subscription(VehicleStatus, '/fmu/out/vehicle_status', self.status_callback, qos)
         # if using SITL, use vehicle status with v1
         self.status_sub = self.create_subscription(VehicleStatus, '/fmu/out/vehicle_status_v1', self.status_callback, qos)
-        # Add subscription for land detection
         self.land_detected_sub = self.create_subscription(VehicleLandDetected, '/fmu/out/vehicle_land_detected', self.land_detected_callback, qos)
 
         self.current_status = VehicleStatus()
         self.is_landed = True 
         self.window = None
+        self.is_in_offboard = False
 
         self.timer = self.create_timer(0.02, self.timer_callback)
         self.twist = Twist()
@@ -193,20 +193,27 @@ class DroneGUIControl(Node):
 
         is_armed = self.current_status.arming_state == VehicleStatus.ARMING_STATE_ARMED
         is_disarmed = self.current_status.arming_state == VehicleStatus.ARMING_STATE_DISARMED
+        is_landing = self.current_status.nav_state in [ VehicleStatus.NAVIGATION_STATE_AUTO_LAND, VehicleStatus.NAVIGATION_STATE_AUTO_RTL] 
+        self.is_in_offboard = self.current_status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD
 
         if is_armed and not self.is_landed:
-            # Drone is armed and airborne - enable land button, disable arm button
+            # Armed but not landed
             self.window.arm_button.setText("Armed")
             self.window.arm_button.setEnabled(False)
-            self.window.hold_button.setEnabled(True)
-            if self.current_status.nav_state == VehicleStatus.NAVIGATION_STATE_AUTO_LAND or self.current_status.nav_state == VehicleStatus.NAVIGATION_STATE_AUTO_RTL:
+            if is_landing:
                 self.window.land_button.setText("Landing...")
                 self.window.land_button.setEnabled(False)
                 self.window.rtl_button.setEnabled(False)
+                self.window.offboard_button.setEnabled(False)
             else:
                 self.window.land_button.setText("Land and Disarm")
                 self.window.land_button.setEnabled(True)
                 self.window.rtl_button.setEnabled(True)
+                self.window.offboard_button.setEnabled(True)
+                if self.is_in_offboard:
+                    self.window.offboard_button.setText("Switch to Hold Mode")
+                else:
+                    self.window.offboard_button.setText("Switch to Offboard Mode")
         elif is_disarmed and self.is_landed:
             # Drone is disarmed and landed - ready for next flight
             self.window.arm_button.setText("Arm and Takeoff")
@@ -214,14 +221,14 @@ class DroneGUIControl(Node):
             self.window.land_button.setText("Land and Disarm")
             self.window.land_button.setEnabled(False)
             self.window.rtl_button.setEnabled(False)
-            self.window.hold_button.setEnabled(False)
+            self.window.offboard_button.setEnabled(False)
         else:
             # Default state
             self.window.arm_button.setText("Arm and Takeoff")
             self.window.arm_button.setEnabled(is_disarmed)
             self.window.land_button.setEnabled(False)
             self.window.rtl_button.setEnabled(False)
-            self.window.hold_button.setEnabled(False)
+            self.window.offboard_button.setEnabled(False)
 
     def arm_drone(self, arm):
         if arm:
@@ -235,6 +242,14 @@ class DroneGUIControl(Node):
         self.stop_offboard_pub.publish(Bool(data=True))
         self.get_logger().info("Land command sent, switching to Land mode")
         self.arm_pub.publish(Bool(data=False))
+    
+    def offboard_switch(self):
+        if self.is_in_offboard:
+            self.stop_offboard_pub.publish(Bool(data=True))
+            self.offboard_request_pub.publish(Bool(data=False))
+            self.hold_request_pub.publish(Bool(data=True))
+        else:
+            self.offboard_request_pub.publish(Bool(data=True))
 
 class MainWindow(QMainWindow):
     def __init__(self, node):
@@ -243,7 +258,6 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("PX4 Drone Control GUI")
         self.setGeometry(500, 200, 500, 500)
         
-        # Layout
         layout = QVBoxLayout()
         widget = QWidget()
         widget.setLayout(layout)
@@ -260,10 +274,10 @@ class MainWindow(QMainWindow):
         self.land_button.setEnabled(False)
         mode_button_layout.addWidget(self.land_button, 0, 1)
 
-        self.hold_button = QPushButton("Hold Mode")
-        self.hold_button.clicked.connect(self.hold_logic)
-        self.hold_button.setEnabled(False)
-        mode_button_layout.addWidget(self.hold_button, 1, 0)
+        self.offboard_button = QPushButton("Offboard Mode")
+        self.offboard_button.clicked.connect(self.offboard_logic)
+        self.offboard_button.setEnabled(False)
+        mode_button_layout.addWidget(self.offboard_button, 1, 0)
 
         self.rtl_button = QPushButton("Return to Launch (RTL)")
         self.rtl_button.clicked.connect(self.return_to_launch)
@@ -524,11 +538,8 @@ class MainWindow(QMainWindow):
         self.node.twist.angular.z = self.yaw_slider.value() / 100.0
 
     def arm_logic(self):
-        if self.node.current_status.arming_state == VehicleStatus.ARMING_STATE_ARMED:
-            QMessageBox.warning(self, "Arming Error", "Drone is already armed!")
-        else:
-            self.node.arm_drone(True)
-            self.node.get_logger().info("Arm button pressed, arming...")
+        self.node.arm_drone(True)
+        self.node.get_logger().info("Arm button pressed, arming...")
 
     def land_logic(self):
         self.node.land_drone()
@@ -537,9 +548,8 @@ class MainWindow(QMainWindow):
         self.node.rtl_request_pub.publish(Bool(data=True))
         self.node.get_logger().info("Return to Launch (RTL) command sent")
     
-    def hold_logic(self):
-        self.node.hold_request_pub.publish(Bool(data=True))
-        self.node.get_logger().info("Switch to Hold Mode command sent")
+    def offboard_logic(self):
+        self.node.offboard_switch()
 
 def main():
     rclpy.init()
