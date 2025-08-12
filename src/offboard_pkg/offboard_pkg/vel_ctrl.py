@@ -5,7 +5,7 @@ import numpy as np
 from rclpy.clock import Clock
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
 
-from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleStatus, VehicleAttitude, VehicleCommand, VehicleGlobalPosition, VehicleLocalPosition
+from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleStatus, VehicleAttitude, VehicleCommand
 from geometry_msgs.msg import Twist, Vector3
 from std_msgs.msg import Bool
 
@@ -38,7 +38,6 @@ def arming_state_to_string(arming_state):
     }.get(arming_state, f"Unknown ({arming_state})")
 
 class OffboardControl(Node):
-
     def __init__(self):
         super().__init__('vel_ctrl')
         qos = QoSProfile(
@@ -55,10 +54,10 @@ class OffboardControl(Node):
         self.offboard_velocity_sub = self.create_subscription(Twist, '/offboard_velocity_cmd', self.offboard_velocity_callback, qos)
         self.arm_request_sub = self.create_subscription(Bool, '/arm_request', self.arm_request_callback, qos)
         self.rtl_request_sub = self.create_subscription(Bool, '/rtl_request', self.rtl_request_callback, qos)
-        self.offboard_request_sub = self.create_subscription(Bool, '/offboard_request', self.offboard_request_callback, qos)
         self.land_request_sub = self.create_subscription(Bool, '/land_request', self.land_request_callback, qos)
-        self.position_request_sub = self.create_subscription(Bool, '/position_request', self.position_request_callback, qos)
         self.stop_offboard_sub = self.create_subscription(Bool, '/stop_offboard', self.stop_offboard_callback, qos)
+        self.position_request_sub = self.create_subscription(Bool, '/position_request', self.position_request_callback, qos)
+        self.offboard_request_sub = self.create_subscription(Bool, '/offboard_request', self.offboard_request_callback, qos)
 
         # Publishers
         self.publisher_offboard_mode = self.create_publisher(OffboardControlMode, '/fmu/in/offboard_control_mode', qos)
@@ -158,6 +157,25 @@ class OffboardControl(Node):
         self.failsafe = msg.failsafe
         self.flightCheck = msg.pre_flight_checks_pass
 
+    def _should_transition_to_landing(self):
+        """Check if conditions are met to transition to landing state"""
+        return (self.rtl_request or self.landing_initiated or self.nav_state == VehicleStatus.NAVIGATION_STATE_AUTO_LAND)
+    
+    def _transition_to_landing(self):
+        """Execute transition to landing state"""
+        self.get_logger().info("Switch to landing state")
+        self.offboardMode = False
+        self.allow_offboard_switch = False
+        self.current_state = "LANDING"
+
+    def _transistion_to_offboard(self):
+        """Execute transition to offboard state"""
+        self.allow_offboard_switch = True
+        self.state_offboard()
+        if self.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD:
+            self.current_state = "OFFBOARD"
+            self.get_logger().info("User requested Offboard, swtiching to OFFBOARD")
+
     def state_machine(self):
         if not self.fsm_paused and not self.rc_override:
             match self.current_state:
@@ -166,17 +184,10 @@ class OffboardControl(Node):
                         externally_armed = self.arm_state == VehicleStatus.ARMING_STATE_ARMED and not self.arm_message
                         if self.arm_message == False and self.arm_state != VehicleStatus.ARMING_STATE_ARMED:
                             self.position()
-                        elif self.rtl_request or self.landing_initiated or self.nav_state == VehicleStatus.NAVIGATION_STATE_AUTO_LAND:
-                            self.get_logger().info("Switch to landing state")
-                            self.offboardMode = False
-                            self.allow_offboard_switch = False
-                            self.current_state = "LANDING"
+                        elif self._should_transition_to_landing():
+                            self._transition_to_landing()
                         elif self.offboard_request and self.arm_state == VehicleStatus.ARMING_STATE_ARMED:
-                            self.allow_offboard_switch = True
-                            self.state_offboard()
-                            if self.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD:
-                                self.current_state = "OFFBOARD"
-                                self.get_logger().info("User requested Offboard, swtiching to OFFBOARD")
+                            self._transistion_to_offboard()
                         elif self.flightCheck and (self.arm_message or externally_armed) and not self.position_request:
                             self.current_state = "ARM_AND_TAKEOFF"
                             self.get_logger().info("Arm and Takeoff requested")
@@ -197,17 +208,10 @@ class OffboardControl(Node):
                     self.take_off()
 
                 case "HOLD":
-                    if self.rtl_request or self.landing_initiated or self.nav_state == VehicleStatus.NAVIGATION_STATE_AUTO_LAND:
-                        self.get_logger().info("Switch to landing state")
-                        self.offboardMode = False
-                        self.allow_offboard_switch = False
-                        self.current_state = "LANDING"
+                    if self._should_transition_to_landing():
+                            self._transition_to_landing()
                     elif self.offboard_request:
-                        self.allow_offboard_switch = True
-                        self.state_offboard()
-                        if self.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD:
-                            self.current_state = "OFFBOARD"
-                            self.get_logger().info("User requested Offboard, swtiching to OFFBOARD")
+                        self._transistion_to_offboard()
 
                 case "OFFBOARD":
                     if not self.flightCheck or self.arm_state != VehicleStatus.ARMING_STATE_ARMED or self.failsafe:
@@ -215,11 +219,8 @@ class OffboardControl(Node):
                         self.allow_offboard_switch = False
                         self.current_state = "POSITION"
                         self.get_logger().info("Flight Check Failed, switching to POSITION")
-                    elif self.rtl_request or self.landing_initiated or self.nav_state == VehicleStatus.NAVIGATION_STATE_AUTO_LAND:
-                        self.get_logger().info("Switch to landing state")
-                        self.offboardMode = False
-                        self.allow_offboard_switch = False
-                        self.current_state = "LANDING"
+                    elif self._should_transition_to_landing():
+                            self._transition_to_landing()
                     elif self.position_request:
                         self.offboardMode = False
                         self.allow_offboard_switch = False
@@ -268,11 +269,10 @@ class OffboardControl(Node):
         if self.nav_state != VehicleStatus.NAVIGATION_STATE_POSCTL:
             self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_DO_SET_MODE, 1., 3.)
 
-    def publish_vehicle_command(self, command, param1=0.0, param2=0.0, param3=0.0, param7=0.0):
+    def publish_vehicle_command(self, command, param1=0.0, param2=0.0, param7=0.0):
         msg = VehicleCommand()
         msg.param1 = param1
         msg.param2 = param2
-        msg.param3 = param3
         msg.param7 = param7
         msg.command = command
         msg.target_system = 1

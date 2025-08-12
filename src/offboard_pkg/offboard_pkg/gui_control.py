@@ -10,10 +10,9 @@ from geometry_msgs.msg import Twist
 from px4_msgs.msg import VehicleCommand, VehicleStatus, VehicleLandDetected
 from std_msgs.msg import Bool
 import math
-import time
 
-# added dictionary to convert state number to actual state
 def nav_state_to_string(nav_state):
+    """Convert navigation state number to string representation"""
     return {
         0: "Manual",
         1: "Altitude",
@@ -35,14 +34,16 @@ def nav_state_to_string(nav_state):
         22: "VTOL Takeoff",
     }.get(nav_state, f"Unknown ({nav_state})")
 
-# same logic for arm number to arm state
 def arming_state_to_string(arming_state):
+    """Convert arming state number to string representation"""
     return {
         1: "Disarmed",
         2: "Armed"
     }.get(arming_state, f"Unknown ({arming_state})")
 
 class ClickableCanvas(QWidget):
+    """Canvas for displaying and interacting with the drone's field of view"""
+    # Parameters for the actual resolution, display resolution, and field of view
     ACTUAL_WIDTH = 1920
     ACTUAL_HEIGHT = 1080
     DISPLAY_WIDTH = 640
@@ -62,7 +63,8 @@ class ClickableCanvas(QWidget):
         self.actual_y = None
         self.center_x = self.display_width // 2
         self.center_y = self.display_height // 2
-
+    
+    # Gets coordinate from left mouse click
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.disp_x = event.x()
@@ -75,6 +77,7 @@ class ClickableCanvas(QWidget):
             if hasattr(window, 'on_canvas_click'):
                 window.on_canvas_click()
     
+    # Calculates angles from pixel coordinates based on the actual resolution and field of view
     def get_angles_from_pixel(self, x, y):
         offset_x = x - self.ACTUAL_WIDTH // 2
         offset_y = y - self.ACTUAL_HEIGHT // 2
@@ -114,6 +117,7 @@ class ClickableCanvas(QWidget):
         # Draw center label
         painter.drawText(self.center_x + 10, self.center_y + 20, "Center (0°, 0°)")
 
+        # Draw the target point if it exists
         if self.disp_x is not None and self.disp_y is not None:
             painter.setBrush(QBrush(Qt.blue))
             painter.setPen(QPen(Qt.blue, 2))
@@ -123,6 +127,7 @@ class ClickableCanvas(QWidget):
             painter.drawText(self.disp_x + 10, self.disp_y + 10, f"XY: {angle_xy:.1f}°, Z: {angle_z:.1f}°")
 
 def velocity_from_angles(vel, angle_xy, angle_z):
+    """Calculates the velocity components from given angle and velocity"""
     v_pitch = vel * math.cos(math.radians(angle_z)) * math.cos(math.radians(angle_xy))
     v_roll = vel * math.cos(math.radians(angle_z)) * math.sin(math.radians(angle_xy))
     v_throttle = vel * math.sin(math.radians(angle_z))
@@ -138,29 +143,30 @@ class DroneGUIControl(Node):
             depth=10
         )
 
+        # Publishers
         self.cmd_pub = self.create_publisher(VehicleCommand, '/fmu/in/vehicle_command', 10)
         self.vel_pub = self.create_publisher(Twist, 'offboard_velocity_cmd', qos)
         self.arm_request_pub = self.create_publisher(Bool, '/arm_request', qos)
-        self.position_request_pub = self.create_publisher(Bool, '/position_request', qos)
         self.rtl_request_pub = self.create_publisher(Bool, '/rtl_request', qos)
         self.land_request_pub = self.create_publisher(Bool, '/land_request', qos)
-        self.offboard_request_pub = self.create_publisher(Bool, '/offboard_request', qos)
         self.stop_offboard_pub = self.create_publisher(Bool, '/stop_offboard', qos)
-
+        self.position_request_pub = self.create_publisher(Bool, '/position_request', qos)
+        self.offboard_request_pub = self.create_publisher(Bool, '/offboard_request', qos)
+        
+        # Subscribers
         #self.status_sub = self.create_subscription(VehicleStatus, '/fmu/out/vehicle_status', self.status_callback, qos) # real drone
         self.status_sub = self.create_subscription(VehicleStatus, '/fmu/out/vehicle_status_v1', self.status_callback, qos) # sitl
         self.land_detected_sub = self.create_subscription(VehicleLandDetected, '/fmu/out/vehicle_land_detected', self.land_detected_callback, qos)
 
+        # Timers
+        self.timer = self.create_timer(0.02, self.timer_callback)
+
+        # Variables
         self.current_status = VehicleStatus()
+        self.twist = Twist()
         self.is_landed = True 
         self.window = None
         self.is_in_offboard = False
-
-        self.timer = self.create_timer(0.02, self.timer_callback)
-        self.twist = Twist()
-    
-    def timer_callback(self):
-        self.vel_pub.publish(self.twist)
     
     def publish_vehicle_command(self, command, param1=0.0, param2=0.0, param7=0.0):
         cmd = VehicleCommand()
@@ -176,6 +182,11 @@ class DroneGUIControl(Node):
         cmd.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         self.cmd_pub.publish(cmd)
 
+    # --- Callbacks ---
+    def timer_callback(self):
+        """Publishes velocity command constantly"""
+        self.vel_pub.publish(self.twist)
+
     def status_callback(self, msg):
         self.current_status = msg
         self.update_gui_state()
@@ -184,7 +195,6 @@ class DroneGUIControl(Node):
         self.is_landed = msg.landed
         self.update_gui_state()
 
-    # handles the functionality of enabling the button or disabling the button
     def update_gui_state(self):
         """Update GUI button states based on current vehicle status"""
         if not self.window:
@@ -228,32 +238,31 @@ class DroneGUIControl(Node):
             self.window.rtl_button.setEnabled(False)
             self.window.offboard_button.setEnabled(False)
 
-    def arm_drone(self, arm):
-        if arm:
-            self.arm_request_pub.publish(Bool(data=True))
-            self.get_logger().info("Sending arm message")
+    # --- Button logics ---
+    def arm_drone(self):
+        self.arm_request_pub.publish(Bool(data=True))
+        self.get_logger().info("Arm command sent, switch to arming")
     
-    def land_drone(self):
-        self.land_request_pub.publish(Bool(data=True))
-        self.get_logger().info("Land command sent, switching to Land mode")
+    def landing_sequence(self, command):
+        self.get_logger().info(f"{command} command sent, switching to {command} mode")
         self.arm_request_pub.publish(Bool(data=False))
         if self.is_in_offboard:
             self.offboard_request_pub.publish(Bool(data=False))
             self.stop_offboard_pub.publish(Bool(data=True))
 
+    def land_drone(self):
+        self.land_request_pub.publish(Bool(data=True))
+        self.landing_sequence("Land")
+
     def rtl_drone(self):
         self.rtl_request_pub.publish(Bool(data=True))
-        self.get_logger().info("Land command sent, switching to Land mode")
-        self.arm_request_pub.publish(Bool(data=False))
-        if self.is_in_offboard:
-            self.offboard_request_pub.publish(Bool(data=False))
-            self.stop_offboard_pub.publish(Bool(data=True))
+        self.landing_sequence("Return to Launch (RTL)")
     
     def offboard_switch(self):
         if self.is_in_offboard:
             self.stop_offboard_pub.publish(Bool(data=True))
-            self.offboard_request_pub.publish(Bool(data=False))
             self.position_request_pub.publish(Bool(data=True))
+            self.offboard_request_pub.publish(Bool(data=False))
         else:
             self.stop_offboard_pub.publish(Bool(data=False))
             self.position_request_pub.publish(Bool(data=False))
@@ -271,6 +280,7 @@ class MainWindow(QMainWindow):
         widget.setLayout(layout)
         self.setCentralWidget(widget)
 
+        # --- Mode Buttons ---
         mode_button_layout = QGridLayout()
         
         self.arm_button = QPushButton("Arm and Takeoff")
@@ -294,6 +304,7 @@ class MainWindow(QMainWindow):
 
         layout.addLayout(mode_button_layout)
 
+        # --- Canvas ---
         canvas_layout = QVBoxLayout()
         canvas_layout.addWidget(QLabel("Clickable canvas - Click to set target coordinate:"))
 
@@ -335,6 +346,7 @@ class MainWindow(QMainWindow):
 
         layout.addLayout(canvas_layout)
 
+        # -- RC Layout ---
         rc_layout = QGridLayout()
 
         throttle_layout = QVBoxLayout()
@@ -378,64 +390,6 @@ class MainWindow(QMainWindow):
         rc_layout.addLayout(roll_layout, 1, 1)
 
         layout.addLayout(rc_layout)
-
-        # textbox_layout = QGridLayout()
-
-        # self.xy_angle = QLineEdit(self)
-        # self.xy_angle.setPlaceholderText("Enter angle (X)")
-        # textbox_layout.addWidget(self.xy_angle, 0, 0)
-
-        # self.z_angle = QLineEdit(self)
-        # self.z_angle.setPlaceholderText("Enter angle (Z)")
-        # textbox_layout.addWidget(self.z_angle, 0, 1)
-
-        # self.velocity = QLineEdit(self)
-        # self.velocity.setPlaceholderText("Enter velocity")
-        # textbox_layout.addWidget(self.velocity, 0, 2)
-
-        # self.duration = QLineEdit(self)
-        # self.duration.setPlaceholderText("Enter duration")
-        # textbox_layout.addWidget(self.duration, 0, 3)
-
-        # self.xy_angle.setToolTip("Angle in XY plane (0°=forward, 90°=right, 180°=back)")
-        # self.z_angle.setToolTip("Angle above XY plane (0°=flat, 90°=straight up)")
-        # self.velocity.setToolTip("Speed magnitude in m/s")
-        # self.duration.setToolTip("Duration in s")
-        
-        # layout.addLayout(textbox_layout)
-
-        # self.submit_button = QPushButton("Submit")
-        # self.submit_button.clicked.connect(self.submit)
-        # layout.addWidget(self.submit_button)
-
-        # coords_textbox_layout = QGridLayout()
-
-        # self.x_coord = QLineEdit(self)
-        # self.x_coord.setPlaceholderText("Enter coordinate (X)")
-        # coords_textbox_layout.addWidget(self.x_coord, 0, 0)
-
-        # self.y_coord = QLineEdit(self)
-        # self.y_coord.setPlaceholderText("Enter coordinate (Y)")
-        # coords_textbox_layout.addWidget(self.y_coord, 0, 1)
-
-        # self.coords_velocity = QLineEdit(self)
-        # self.coords_velocity.setPlaceholderText("Enter velocity")
-        # coords_textbox_layout.addWidget(self.coords_velocity, 0, 2)
-
-        # self.coords_duration = QLineEdit(self)
-        # self.coords_duration.setPlaceholderText("Enter duration")
-        # coords_textbox_layout.addWidget(self.coords_duration, 0, 3)
-
-        # self.x_coord.setToolTip("Coordinate in X (0-640)")
-        # self.y_coord.setToolTip("Coordinate in Y (0-480)")
-        # self.coords_velocity.setToolTip("Speed magnitude in m/s")
-        # self.coords_duration.setToolTip("Duration in s")
-        
-        # layout.addLayout(coords_textbox_layout)
-
-        # self.coords_submit_button = QPushButton("Submit")
-        # self.coords_submit_button.clicked.connect(self.coords_submit)
-        # layout.addWidget(self.coords_submit_button)
         
     def on_canvas_click(self):
         self.canvas_execute_button.setEnabled(True)
@@ -538,16 +492,13 @@ class MainWindow(QMainWindow):
         self.update_velocity()
     
     def update_velocity(self):
-        # self.node.twist.linear.y = self.pitch_slider.value() / 100.0
-        # self.node.twist.linear.x = -(self.roll_slider.value() / 100.0)
         self.node.twist.linear.x = self.pitch_slider.value() / 50.0
         self.node.twist.linear.y = self.roll_slider.value() / 50.0
         self.node.twist.linear.z = self.throttle_slider.value() / 100.0
         self.node.twist.angular.z = self.yaw_slider.value() / 100.0
 
     def arm_logic(self):
-        self.node.arm_drone(True)
-        self.node.get_logger().info("Arm button pressed, arming...")
+        self.node.arm_drone()
 
     def land_logic(self):
         self.node.land_drone()
