@@ -2,19 +2,13 @@
 
 ## Overview
 
----
-
 This repo provides an example of using offboard mode in PX4 with a simple gui. The code is written in Python and includes a version using ROS2 and the other with MAVSDK. 
 
 ## SITL Demo
 
----
-
 To view the demo in SITL, check out the recording here: https://youtu.be/KBl8BWIlt5U?si=wn5qFk6GNARu-g41
 
 ## Note
-
----
 
 To use this package, make sure the following have been installed. 
 
@@ -34,8 +28,6 @@ If you need help with setting up your drone, please visit this guide for more in
  [PX4 101 Guide](https://www.notion.so/PX4-101-Guide-222f130fcb60800c8afffc4887eca054?pvs=21)  for more info
 
 ## How to setup
-
----
 
 This repo is a workspace package so it contains the src folder already. To be able to use this workspace follow:
 
@@ -81,8 +73,6 @@ This repo is a workspace package so it contains the src folder already. To be ab
 
 ## Running the code
 
----
-
 You can test the code with the ROS2 version or the MAVSDK version
 
 1. ROS2:
@@ -124,8 +114,6 @@ You can test the code with the ROS2 version or the MAVSDK version
         
 
 ## Explanation
-
----
 
 ### How to control the drone:
 
