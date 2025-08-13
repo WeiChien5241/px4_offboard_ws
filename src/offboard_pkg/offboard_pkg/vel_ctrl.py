@@ -186,7 +186,7 @@ class OffboardControl(Node):
                             self.position()
                         elif self._should_transition_to_landing():
                             self._transition_to_landing()
-                        elif self.offboard_request and self.arm_state == VehicleStatus.ARMING_STATE_ARMED:
+                        elif (self.offboard_request and self.arm_state == VehicleStatus.ARMING_STATE_ARMED):
                             self._transistion_to_offboard()
                         elif self.flightCheck and (self.arm_message or externally_armed) and not self.position_request:
                             self.current_state = "ARM_AND_TAKEOFF"
@@ -210,7 +210,7 @@ class OffboardControl(Node):
                 case "HOLD":
                     if self._should_transition_to_landing():
                             self._transition_to_landing()
-                    elif self.offboard_request:
+                    elif self.offboard_request or (not self.offboard_request and self.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD):
                         self._transistion_to_offboard()
 
                 case "OFFBOARD":

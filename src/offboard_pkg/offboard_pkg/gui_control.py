@@ -203,12 +203,16 @@ class DroneGUIControl(Node):
         is_armed = self.current_status.arming_state == VehicleStatus.ARMING_STATE_ARMED
         is_landing = self.current_status.nav_state in [ VehicleStatus.NAVIGATION_STATE_AUTO_LAND, VehicleStatus.NAVIGATION_STATE_AUTO_RTL] 
         self.is_in_offboard = self.current_status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD
+        print(f"DEBUG: Current state: is_armed={is_armed}, is_landed={self.is_landed}")
+        print(f"DEBUG: Cuurent state: {arming_state_to_string(self.current_status.arming_state)}, {nav_state_to_string(self.current_status.nav_state)}")
 
         if is_armed and not self.is_landed:
+            print("DEBUG: Drone is flying")
             # Armed but not landed
             self.window.arm_button.setText("Armed")
             self.window.arm_button.setEnabled(False)
             if is_landing:
+                print("DEBUG: drone landing")
                 self.window.land_button.setText("Landing...")
                 self.window.land_button.setEnabled(False)
                 self.window.rtl_button.setEnabled(False)
@@ -219,11 +223,14 @@ class DroneGUIControl(Node):
                 self.window.rtl_button.setEnabled(True)
                 self.window.offboard_button.setEnabled(True)
                 if self.is_in_offboard:
+                    print("DEBUG: drone in offboard mode")
                     self.window.offboard_button.setText("Switch to Position Mode")
                 else:
+                    print("DEBUG: drone not in offboard mode")
                     self.window.offboard_button.setText("Switch to Offboard Mode")
         elif not is_armed and self.is_landed:
             # Drone is disarmed and landed - ready for next flight
+            print("DEBUG: Drone is ready for a flight")
             self.window.arm_button.setText("Arm and Takeoff")
             self.window.arm_button.setEnabled(True)
             self.window.land_button.setText("Land and Disarm")
@@ -232,6 +239,7 @@ class DroneGUIControl(Node):
             self.window.offboard_button.setEnabled(False)
         else:
             # Default state
+            print("DEBUG: State 3")
             self.window.arm_button.setText("Arm and Takeoff")
             self.window.arm_button.setEnabled(not is_armed)
             self.window.land_button.setEnabled(False)
