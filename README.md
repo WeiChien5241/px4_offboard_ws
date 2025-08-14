@@ -23,7 +23,7 @@ This guide has several assumptions:
 - Assumes connection between QGC and drone is established
 - Assumes ROS2 functionality is enabled in companion computer.
 
-If you need help with setting up your drone, please visit this guide for more info: [PX4 101 Guide](https://www.notion.so/PX4-101-Guide-222f130fcb60800c8afffc4887eca054?pvs=21)
+If you need help with setting up your drone, please visit this guide for more info: [PX4 101 Guide](https://www.notion.so/PX4-101-Guide-222f130fcb60800c8afffc4887eca054?pvs=21) 
 
 ## How to setup
 
@@ -121,16 +121,32 @@ You can test the code with the ROS2 version or the MAVSDK version
 - Think of the canvas as the 2D POV of the drone, in which the center is the drone
     - Click on the canvas to specify a point, input velocity and duration to make the drone fly
     - To make the drone fly backwards, make the velocity to be negative
+    - Ex. If you want the drone to move to the upper right
+        - Click on the canvas on the upper right section
+        - Enter velocity and duration
+        - Click on execute target
+        - The drone should move towards your specified target point
 - To exit offboard mode, click on the button again to enter position mode
 - You can land the drone with the land or RTL button
+
+![Screenshot 2025-08-13 150545.png](attachment:5093de39-7f10-4c2c-94e1-0f301dc2525f:Screenshot_2025-08-13_150545.png)
 
 ### Slider and Canvas Mechanism:
 
 Both of the controls uses trajectory setpoint to send velocity data to the drone. 
 
-The sliders are able to control the roll, pitch, yaw and throttle of the drone, basically simulating an RC controller but using a GUI to do so. Once the sliders are released, they go back to their original position. 
+Sliders:
 
-The canvas simulates a drone’s POV if the drone has a camera. It assumes the center is the drone. By using the FOV of a camera and the resolution of the image, we are able to calculate the angles of the drone relative to the point specified. If assuming a Forward Right Up coordinate system, where X is to the front, Y to the right, Z to the up. The angles refer to the angle relative to the XY starting from X, and angle relative to XZ, starting from X. Using these two angles, we are able to calculate the three vector velocities based on the total velocity given using simple trig calculations. The calculations can be seen inside the code. 
+- Control the roll, pitch, yaw and throttle of the drone, basically simulating an RC control
+- Once the sliders are released, they go back to their original position
+
+Canvas:
+
+![IMG_4042.JPG](attachment:e2f2f520-2d55-41fb-9e36-ff153906700d:IMG_4042.jpg)
+
+- Simulates a drone’s POV if the drone has a camera and assumes the center is the drone.
+- By using the FOV of a camera and the resolution of the image, we are able to calculate the angles of the drone relative to the point specified.
+- If assuming a Forward Right Up coordinate system, where X is to the front, Y to the right, Z to the up. The angles refer to the angle relative to the XY starting from X, and angle relative to XZ, starting from X. Using these two angles, we are able to calculate the three vector velocities based on the total velocity given using simple trig calculations. The calculations can be seen inside the code.
 
 More information regarding FOV and how it works can be seen here:
 

@@ -135,7 +135,8 @@ class DroneControl:
         
         self.window = None
         self.loop = None
-        
+    
+    # async def connect(self, connection_string="serial:///dev/ttyUSB0:57600"):
     async def connect(self, connection_string="udp://:14540"):
         """Connect to the drone"""
         print(f"Connecting to drone at {connection_string}...")

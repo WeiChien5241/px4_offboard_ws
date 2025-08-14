@@ -201,9 +201,10 @@ class DroneGUIControl(Node):
         is_armed = self.current_status.arming_state == VehicleStatus.ARMING_STATE_ARMED
         is_landing = self.current_status.nav_state in [ VehicleStatus.NAVIGATION_STATE_AUTO_LAND, VehicleStatus.NAVIGATION_STATE_AUTO_RTL] 
         self.is_in_offboard = self.current_status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD
-        print(f"DEBUG: Cuurent state: {arming_state_to_string(self.current_status.arming_state)}, is_landed={self.is_landed}, {nav_state_to_string(self.current_status.nav_state)}")
+        print(f"DEBUG: Current state: {arming_state_to_string(self.current_status.arming_state)}, is_landed={self.is_landed}, {nav_state_to_string(self.current_status.nav_state)}")
 
-        if is_armed and not self.is_landed:
+        # if is_armed and not self.is_landed:
+        if is_armed:
             print("DEBUG: Drone is flying")
             # Armed but not landed
             self.window.arm_button.setText("Armed")
@@ -225,7 +226,8 @@ class DroneGUIControl(Node):
                 else:
                     print("DEBUG: Drone not in offboard mode")
                     self.window.offboard_button.setText("Switch to Offboard Mode")
-        elif not is_armed and self.is_landed:
+        # elif not is_armed and self.is_landed:
+        elif not is_armed:
             # Drone is disarmed and landed - ready for next flight
             print("DEBUG: Drone is ready for a flight")
             self.window.arm_button.setText("Arm and Takeoff")
@@ -242,6 +244,10 @@ class DroneGUIControl(Node):
             self.window.land_button.setEnabled(True)
             self.window.rtl_button.setEnabled(True)
             self.window.offboard_button.setEnabled(True)
+            if self.is_in_offboard:
+                self.window.offboard_button.setText("Switch to Position Mode")
+            else:
+                self.window.offboard_button.setText("Switch to Offboard Mode")
 
     # --- Button logics ---
     def arm_drone(self):
@@ -428,59 +434,6 @@ class MainWindow(QMainWindow):
         self.velocity_display.setText(f"Velocity: x={v_pitch:.2f}, y={v_roll:.2f}, z={v_throttle:.2f}")
 
         QTimer.singleShot(int(canvas_duration_time * 1000), self.stop_velocity)
-
-    # def coords_submit(self):
-        try:
-            target_x_coord = float(self.x_coord.text())
-            target_y_coord = float(self.y_coord.text())
-            coord_vel = float(self.coords_velocity.text())
-            coord_duration_time = float(self.coords_duration.text())
-        except ValueError:
-            QMessageBox.warning(self, "Invalid Input", "Please enter valid coordinate, velocity, and duration values!")
-            return
-        
-        self.x_coord.clear()
-        self.y_coord.clear()
-        self.coords_velocity.clear()
-        self.coords_duration.clear()
-
-        angle_xy, angle_z = self.canvas.get_angles_from_pixel(target_x_coord, target_y_coord)
-        v_pitch, v_roll, v_throttle = velocity_from_angles(coord_vel, angle_xy, angle_z)
-
-        self.node.twist.linear.x = v_pitch
-        self.node.twist.linear.y = v_roll
-        self.node.twist.linear.z = v_throttle
-        self.node.twist.angular.z = 0.0
-
-        self.node.get_logger().info(f"Velocity set: x={v_pitch:.2f}, y={v_roll:.2f}, z={v_throttle:.2f}")
-
-        QTimer.singleShot(int(coord_duration_time * 1000), self.stop_velocity)
-
-    # def submit(self):
-        try:
-            xy_deg = float(self.xy_angle.text())
-            z_deg = float(self.z_angle.text())
-            vel = float(self.velocity.text())
-            duration_time = float(self.duration.text())
-        except ValueError:
-            QMessageBox.warning(self, "Invalid Input", "Please enter valid angle, velocity, and duration values!")
-            return
-
-        self.xy_angle.clear()
-        self.z_angle.clear()
-        self.velocity.clear()
-        self.duration.clear()
-    
-        v_pitch, v_roll, v_throttle = velocity_from_angles(vel, xy_deg, z_deg)
-
-        self.node.twist.linear.x = v_pitch
-        self.node.twist.linear.y = v_roll
-        self.node.twist.linear.z = v_throttle
-        self.node.twist.angular.z = 0.0
-
-        self.node.get_logger().info(f"Velocity set: x={v_pitch:.2f}, y={v_roll:.2f}, z={v_throttle:.2f}")
-
-        QTimer.singleShot(int(duration_time * 1000), self.stop_velocity)
     
     def stop_velocity(self):
         self.node.twist.linear.x = 0.0
