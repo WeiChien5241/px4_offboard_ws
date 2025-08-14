@@ -249,7 +249,7 @@ class OffboardControl(Node):
 
             if self.last_state != self.current_state:
                 self.last_state = self.current_state
-                self.get_logger().info(f"Current state: {self.current_state}")
+                self.get_logger().info(f"State changed: {self.last_state} -> {self.current_state}")
 
     def state_offboard(self):
         if self.allow_offboard_switch and not self.landing_initiated:

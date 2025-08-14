@@ -22,6 +22,7 @@ setup(
         'console_scripts': [
             'gui_control = offboard_pkg.gui_control:main',
             'vel_ctrl = offboard_pkg.vel_ctrl:main',
+            'mavsdk_gui_control = offboard_pkg.mavsdk_gui_control:main',
         ],
     },
 )

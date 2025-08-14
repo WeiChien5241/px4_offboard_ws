@@ -64,8 +64,8 @@ class ClickableCanvas(QWidget):
         self.center_x = self.display_width // 2
         self.center_y = self.display_height // 2
     
-    # Gets coordinate from left mouse click
     def mousePressEvent(self, event):
+        """Gets coordinate from left mouse click"""
         if event.button() == Qt.LeftButton:
             self.disp_x = event.x()
             self.disp_y = event.y()
@@ -77,8 +77,8 @@ class ClickableCanvas(QWidget):
             if hasattr(window, 'on_canvas_click'):
                 window.on_canvas_click()
     
-    # Calculates angles from pixel coordinates based on the actual resolution and field of view
     def get_angles_from_pixel(self, x, y):
+        """Calculates angles from pixel coordinates based on the actual resolution and field of view"""
         offset_x = x - self.ACTUAL_WIDTH // 2
         offset_y = y - self.ACTUAL_HEIGHT // 2
         angle_xy = (offset_x / (self.ACTUAL_WIDTH / 2)) * (self.HFOV_DEG / 2)
@@ -89,13 +89,15 @@ class ClickableCanvas(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
+        # Draw Grid
         painter.setPen(QPen(Qt.lightGray, 1))
         grid_size = 20
         for x in range(0, self.display_width, grid_size):
             painter.drawLine(x, 0, x, self.display_height)
         for y in range(0, self.display_height, grid_size):
             painter.drawLine(0, y, self.display_width, y)
-
+        
+        # Draw Center Lines
         painter.setPen(QPen(Qt.red, 2))
         painter.drawLine(self.center_x, 0, self.center_x, self.display_height)
         painter.drawLine(0, self.center_y, self.display_width, self.center_y)
@@ -106,18 +108,14 @@ class ClickableCanvas(QWidget):
         painter.setFont(QFont("Arial", 10))
         painter.setPen(QPen(Qt.black, 1))
         
-        # Horizontal angle labels
+        # Angle labels
         painter.drawText(10, self.center_y - 10, f"-{self.HFOV_DEG/2}°")
         painter.drawText(self.display_width - 40, self.center_y - 10, f"+{self.HFOV_DEG/2}°")
-        
-        # Vertical angle labels
         painter.drawText(self.center_x + 10, 20, f"+{self.VFOV_DEG/2}°")
         painter.drawText(self.center_x + 10, self.display_height - 10, f"-{self.VFOV_DEG/2}°")
-
-        # Draw center label
         painter.drawText(self.center_x + 10, self.center_y + 20, "Center (0°, 0°)")
 
-        # Draw the target point if it exists
+        # Draw target point
         if self.disp_x is not None and self.disp_y is not None:
             painter.setBrush(QBrush(Qt.blue))
             painter.setPen(QPen(Qt.blue, 2))
@@ -127,7 +125,7 @@ class ClickableCanvas(QWidget):
             painter.drawText(self.disp_x + 10, self.disp_y + 10, f"XY: {angle_xy:.1f}°, Z: {angle_z:.1f}°")
 
 def velocity_from_angles(vel, angle_xy, angle_z):
-    """Calculates the velocity components from given angle and velocity"""
+    """Convert velocity magnitude and angles to velocity components"""
     v_pitch = vel * math.cos(math.radians(angle_z)) * math.cos(math.radians(angle_xy))
     v_roll = vel * math.cos(math.radians(angle_z)) * math.sin(math.radians(angle_xy))
     v_throttle = vel * math.sin(math.radians(angle_z))
@@ -203,8 +201,7 @@ class DroneGUIControl(Node):
         is_armed = self.current_status.arming_state == VehicleStatus.ARMING_STATE_ARMED
         is_landing = self.current_status.nav_state in [ VehicleStatus.NAVIGATION_STATE_AUTO_LAND, VehicleStatus.NAVIGATION_STATE_AUTO_RTL] 
         self.is_in_offboard = self.current_status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD
-        print(f"DEBUG: Current state: is_armed={is_armed}, is_landed={self.is_landed}")
-        print(f"DEBUG: Cuurent state: {arming_state_to_string(self.current_status.arming_state)}, {nav_state_to_string(self.current_status.nav_state)}")
+        print(f"DEBUG: Cuurent state: {arming_state_to_string(self.current_status.arming_state)}, is_landed={self.is_landed}, {nav_state_to_string(self.current_status.nav_state)}")
 
         if is_armed and not self.is_landed:
             print("DEBUG: Drone is flying")
@@ -212,7 +209,7 @@ class DroneGUIControl(Node):
             self.window.arm_button.setText("Armed")
             self.window.arm_button.setEnabled(False)
             if is_landing:
-                print("DEBUG: drone landing")
+                print("DEBUG: Drone landing")
                 self.window.land_button.setText("Landing...")
                 self.window.land_button.setEnabled(False)
                 self.window.rtl_button.setEnabled(False)
@@ -223,10 +220,10 @@ class DroneGUIControl(Node):
                 self.window.rtl_button.setEnabled(True)
                 self.window.offboard_button.setEnabled(True)
                 if self.is_in_offboard:
-                    print("DEBUG: drone in offboard mode")
+                    print("DEBUG: Drone in offboard mode")
                     self.window.offboard_button.setText("Switch to Position Mode")
                 else:
-                    print("DEBUG: drone not in offboard mode")
+                    print("DEBUG: Drone not in offboard mode")
                     self.window.offboard_button.setText("Switch to Offboard Mode")
         elif not is_armed and self.is_landed:
             # Drone is disarmed and landed - ready for next flight
@@ -242,9 +239,9 @@ class DroneGUIControl(Node):
             print("DEBUG: State 3")
             self.window.arm_button.setText("Arm and Takeoff")
             self.window.arm_button.setEnabled(not is_armed)
-            self.window.land_button.setEnabled(False)
-            self.window.rtl_button.setEnabled(False)
-            self.window.offboard_button.setEnabled(False)
+            self.window.land_button.setEnabled(True)
+            self.window.rtl_button.setEnabled(True)
+            self.window.offboard_button.setEnabled(True)
 
     # --- Button logics ---
     def arm_drone(self):

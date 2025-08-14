@@ -23,9 +23,7 @@ This guide has several assumptions:
 - Assumes connection between QGC and drone is established
 - Assumes ROS2 functionality is enabled in companion computer.
 
-If you need help with setting up your drone, please visit this guide for more info:
-
- [PX4 101 Guide](https://www.notion.so/PX4-101-Guide-222f130fcb60800c8afffc4887eca054?pvs=21)  for more info
+If you need help with setting up your drone, please visit this guide for more info: [PX4 101 Guide](https://www.notion.so/PX4-101-Guide-222f130fcb60800c8afffc4887eca054?pvs=21)
 
 ## How to setup
 
